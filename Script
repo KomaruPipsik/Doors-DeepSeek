@@ -1,7 +1,6 @@
 --[[
 	Doors Hobbit/Escape Client Script with GUI
-	Service-Oriented Architecture | Optimized for Luau
-	Version: 3.0
+	Version: 4.0 - FIXED GUI
 --]]
 
 --// Services
@@ -12,10 +11,10 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local StarterGui = game:GetService("StarterGui")
 local Workspace = game:GetService("Workspace")
 local UserInputService = game:GetService("UserInputService")
-local TweenService = game:GetService("TweenService")
 
---// Local Player & Character References
+--// Local Player
 local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 local Camera = Workspace.CurrentCamera
 local Character, Humanoid, RootPart
 
@@ -40,96 +39,79 @@ local Config = {
 	FPSBooster = { Enabled = false },
 }
 
---// Core Services
+--// Core
 local Core = {
 	ESPObjects = {},
-	ActiveConnections = {},
+	Connections = {},
 	ScreechAlerted = {},
 }
 
---// GUI System
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "HobbitGUI"
-ScreenGui.ResetOnSpawn = false
-ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-
--- Wait for PlayerGui
-local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
-ScreenGui.Parent = PlayerGui
-
---// Utility Functions
-local function SafeFind(instance, ...)
-	local success, result = pcall(function()
-		return instance:FindFirstChild(...)
-	end)
-	return success and result or nil
+--// Utility
+local function safeFind(instance, ...)
+	local s, r = pcall(function() return instance:FindFirstChild(...) end)
+	return s and r or nil
 end
 
-local function DisplayNotification(message, duration)
+local function notify(msg, dur)
 	pcall(function()
 		StarterGui:SetCore("SendNotification", {
 			Title = "Hobbit System",
-			Text = message,
-			Duration = duration or 3,
+			Text = msg,
+			Duration = dur or 3,
 		})
 	end)
 end
 
---// ESP Functions
-local function CreateESP(part, color)
+--// ESP
+local function createHighlight(part, color)
 	if not part or not part:IsA("BasePart") then return nil end
-
-	local success, highlight = pcall(function()
-		local h = Instance.new("Highlight")
-		h.FillColor = color
-		h.FillTransparency = 0.5
-		h.OutlineColor = color
-		h.OutlineTransparency = 0
-		h.Adornee = part
-		h.Parent = part
-		return h
+	local s, h = pcall(function()
+		local hl = Instance.new("Highlight")
+		hl.FillColor = color
+		hl.FillTransparency = 0.5
+		hl.OutlineColor = color
+		hl.OutlineTransparency = 0
+		hl.Adornee = part
+		hl.Parent = part
+		return hl
 	end)
-	return success and highlight or nil
+	return s and h or nil
 end
 
-local function ClearAllESP()
-	for _, esp in ipairs(Core.ESPObjects) do
-		pcall(function() esp:Destroy() end)
+local function clearESP()
+	for _, h in ipairs(Core.ESPObjects) do
+		pcall(function() h:Destroy() end)
 	end
 	table.clear(Core.ESPObjects)
 end
 
---// Character Detection
-local function GetCharacter()
+--// Character
+local function getChar()
 	Character = LocalPlayer.Character
 	if Character then
-		Humanoid = SafeFind(Character, "Humanoid")
-		RootPart = SafeFind(Character, "HumanoidRootPart")
+		Humanoid = safeFind(Character, "Humanoid")
+		RootPart = safeFind(Character, "HumanoidRootPart")
 	end
 end
 
 LocalPlayer.CharacterAdded:Connect(function()
 	task.wait(0.1)
-	GetCharacter()
+	getChar()
 	if Config.CustomSpeed.Enabled and Humanoid then
 		Humanoid.WalkSpeed = Config.CustomSpeed.Speed
 	end
 end)
+getChar()
 
-GetCharacter()
-
---// Feature Implementations
-local function SetupFullBright()
-	if Config.FullBright.Enabled then
+--// Features
+local function toggleFullBright(on)
+	if on then
 		Lighting.Brightness = 0.3
 		Lighting.Ambient = Color3.fromRGB(180, 180, 180)
 		Lighting.OutdoorAmbient = Color3.fromRGB(180, 180, 180)
 		Lighting.FogEnd = 10000
 		Lighting.FogStart = 0
-		pcall(function()
-			Lighting.ClockTime = 14
-			Lighting.ExposureCompensation = 0.5
-		end)
+		pcall(function() Lighting.ClockTime = 14 end)
 	else
 		Lighting.Brightness = 1
 		Lighting.Ambient = Color3.fromRGB(0, 0, 0)
@@ -137,53 +119,49 @@ local function SetupFullBright()
 	end
 end
 
-local function SetupFPSBooster()
-	if Config.FPSBooster.Enabled then
-		pcall(function()
-			settings().Rendering.QualityLevel = 1
-		end)
-		for _, descendant in ipairs(Workspace:GetDescendants()) do
+local function toggleFPSBoost(on)
+	if on then
+		pcall(function() settings().Rendering.QualityLevel = 1 end)
+		for _, d in ipairs(Workspace:GetDescendants()) do
 			pcall(function()
-				if descendant:IsA("BasePart") and descendant.Material ~= Enum.Material.SmoothPlastic then
-					descendant.Material = Enum.Material.SmoothPlastic
-				elseif descendant:IsA("Decal") or descendant:IsA("Texture") then
-					descendant.Transparency = 1
+				if d:IsA("BasePart") then
+					d.Material = Enum.Material.SmoothPlastic
+				elseif d:IsA("Decal") or d:IsA("Texture") then
+					d.Transparency = 1
 				end
 			end)
 		end
 	else
-		pcall(function()
-			settings().Rendering.QualityLevel = 7
-		end)
+		pcall(function() settings().Rendering.QualityLevel = 7 end)
 	end
 end
 
---// Scanning Functions
-local function ScanDupeDoors()
-	local currentRooms = SafeFind(Workspace, "CurrentRooms")
-	if not currentRooms or not Config.ESP.DupeDoor.Enabled then return end
+--// Scanners
+local function scanDupeDoors()
+	if not Config.ESP.DupeDoor.Enabled then return end
+	local rooms = safeFind(Workspace, "CurrentRooms")
+	if not rooms then return end
 
 	for i = 0, 100 do
-		local room = SafeFind(currentRooms, tostring(i))
+		local room = safeFind(rooms, tostring(i))
 		if room then
-			local dupeDoor = SafeFind(room, "dupeDoor")
-			if dupeDoor and not dupeDoor:GetAttribute("ESP_Marked") then
-				for _, part in ipairs(dupeDoor:GetDescendants()) do
-					if part:IsA("BasePart") then
-						local esp = CreateESP(part, Config.ESP.DupeDoor.Color)
-						if esp then table.insert(Core.ESPObjects, esp) end
+			local dupe = safeFind(room, "dupeDoor")
+			if dupe and not dupe:GetAttribute("ESP_Marked") then
+				for _, p in ipairs(dupe:GetDescendants()) do
+					if p:IsA("BasePart") then
+						local h = createHighlight(p, Config.ESP.DupeDoor.Color)
+						if h then table.insert(Core.ESPObjects, h) end
 					end
 				end
-				dupeDoor:SetAttribute("ESP_Marked", true)
+				dupe:SetAttribute("ESP_Marked", true)
 			end
 		end
 	end
 end
 
-local function ScanKeys()
+local function scanKeys()
 	if not Config.ESP.Key.Enabled then return end
-
-	local assets = SafeFind(Workspace, "Assets")
+	local assets = safeFind(Workspace, "Assets")
 	if not assets then return end
 
 	for _, dresser in ipairs(assets:GetChildren()) do
@@ -192,12 +170,12 @@ local function ScanKeys()
 				if drawer.Name == "DrawerContainer" or drawer.Name == "DrawerContalner" then
 					for _, keyObj in ipairs(drawer:GetChildren()) do
 						if keyObj.Name == "KeyObtain" or keyObj.Name == "KeyObtaln" then
-							local hitbox = SafeFind(keyObj, "Hitbox")
+							local hitbox = safeFind(keyObj, "Hitbox")
 							if hitbox then
-								local keyHitbox = SafeFind(hitbox, "KeyNitbox") or SafeFind(hitbox, "KeyHitbox")
+								local keyHitbox = safeFind(hitbox, "KeyNitbox") or safeFind(hitbox, "KeyHitbox")
 								if keyHitbox and keyHitbox:IsA("BasePart") and not keyHitbox:GetAttribute("ESP_Marked") then
-									local esp = CreateESP(keyHitbox, Config.ESP.Key.Color)
-									if esp then table.insert(Core.ESPObjects, esp) end
+									local h = createHighlight(keyHitbox, Config.ESP.Key.Color)
+									if h then table.insert(Core.ESPObjects, h) end
 									keyHitbox:SetAttribute("ESP_Marked", true)
 								end
 							end
@@ -209,25 +187,24 @@ local function ScanKeys()
 	end
 end
 
-local function ScanSnares()
+local function scanSnares()
 	if not Config.ESP.Snare.Enabled then return end
-
-	local currentRooms = SafeFind(Workspace, "CurrentRooms")
-	if not currentRooms then return end
+	local rooms = safeFind(Workspace, "CurrentRooms")
+	if not rooms then return end
 
 	for i = 90, 99 do
-		local room = SafeFind(currentRooms, tostring(i))
+		local room = safeFind(rooms, tostring(i))
 		if room then
-			local assets = SafeFind(room, "Assets")
+			local assets = safeFind(room, "Assets")
 			if assets then
 				for _, snare in ipairs(assets:GetChildren()) do
 					if snare.Name == "Snare" then
-						local snareChild = SafeFind(snare, "Snare")
+						local snareChild = safeFind(snare, "Snare")
 						if snareChild then
-							local snareBase = SafeFind(snareChild, "SnareBase")
+							local snareBase = safeFind(snareChild, "SnareBase")
 							if snareBase and snareBase:IsA("BasePart") and not snareBase:GetAttribute("ESP_Marked") then
-								local esp = CreateESP(snareBase, Config.ESP.Snare.Color)
-								if esp then table.insert(Core.ESPObjects, esp) end
+								local h = createHighlight(snareBase, Config.ESP.Snare.Color)
+								if h then table.insert(Core.ESPObjects, h) end
 								snareBase:SetAttribute("ESP_Marked", true)
 							end
 						end
@@ -238,53 +215,48 @@ local function ScanSnares()
 	end
 end
 
-local function ScanBreakers()
+local function scanBreakers()
 	if not Config.ESP.Breaker.Enabled then return end
-
-	local currentRooms = SafeFind(Workspace, "CurrentRooms")
-	if not currentRooms then return end
-
-	local room100 = SafeFind(currentRooms, "100")
+	local rooms = safeFind(Workspace, "CurrentRooms")
+	if not rooms then return end
+	local room100 = safeFind(rooms, "100")
 	if not room100 then return end
 
-	local assets = SafeFind(room100, "Assets")
+	local assets = safeFind(room100, "Assets")
 	if assets then
-		for _, descendant in ipairs(assets:GetDescendants()) do
-			if (descendant.Name == "LiveBreakerPolePickup" or descendant.Name == "LiveBreakerPolePlckup") 
-				and descendant:IsA("BasePart") 
-				and not descendant:GetAttribute("ESP_Marked") then
-				local esp = CreateESP(descendant, Config.ESP.Breaker.Color)
-				if esp then table.insert(Core.ESPObjects, esp) end
-				descendant:SetAttribute("ESP_Marked", true)
+		for _, d in ipairs(assets:GetDescendants()) do
+			if (d.Name == "LiveBreakerPolePickup" or d.Name == "LiveBreakerPolePlckup") 
+				and d:IsA("BasePart") 
+				and not d:GetAttribute("ESP_Marked") then
+				local h = createHighlight(d, Config.ESP.Breaker.Color)
+				if h then table.insert(Core.ESPObjects, h) end
+				d:SetAttribute("ESP_Marked", true)
 			end
 		end
 	end
 end
 
-local function ScanBooks()
+local function scanBooks()
 	if not Config.ESP.Book.Enabled then return end
-
-	local currentRooms = SafeFind(Workspace, "CurrentRooms")
-	if not currentRooms then return end
-
-	local room50 = SafeFind(currentRooms, "50")
+	local rooms = safeFind(Workspace, "CurrentRooms")
+	if not rooms then return end
+	local room50 = safeFind(rooms, "50")
 	if not room50 then return end
 
-	local assets = SafeFind(room50, "Assets")
+	local assets = safeFind(room50, "Assets")
 	if not assets then return end
+	local bs = safeFind(assets, "Bookshelvesl") or safeFind(assets, "Bookshelves")
+	if not bs then return end
 
-	local bookshelves = SafeFind(assets, "Bookshelvesl") or SafeFind(assets, "Bookshelves")
-	if not bookshelves then return end
-
-	for _, shelf in ipairs(bookshelves:GetChildren()) do
-		local modularShelf = SafeFind(shelf, "Modular_Bookshelf")
-		if modularShelf then
-			local books = SafeFind(modularShelf, "Books")
+	for _, shelf in ipairs(bs:GetChildren()) do
+		local ms = safeFind(shelf, "Modular_Bookshelf")
+		if ms then
+			local books = safeFind(ms, "Books")
 			if books then
 				for _, book in ipairs(books:GetChildren()) do
 					if book.Name == "LiveHintBook" and book:IsA("BasePart") and not book:GetAttribute("ESP_Marked") then
-						local esp = CreateESP(book, Config.ESP.Book.Color)
-						if esp then table.insert(Core.ESPObjects, esp) end
+						local h = createHighlight(book, Config.ESP.Book.Color)
+						if h then table.insert(Core.ESPObjects, h) end
 						book:SetAttribute("ESP_Marked", true)
 					end
 				end
@@ -293,41 +265,38 @@ local function ScanBooks()
 	end
 end
 
---// Entity Monitors
-local function MonitorRushAmbush()
+--// Monitors
+local function startRushMonitor()
 	local active = false
 	return RunService.RenderStepped:Connect(function()
-		local rush = SafeFind(Workspace, "RushMoving")
-		local ambush = SafeFind(Workspace, "AmbushMoving")
+		local rush = safeFind(Workspace, "RushMoving")
+		local ambush = safeFind(Workspace, "AmbushMoving")
 
 		if rush and Config.Entities.RushAlert.Enabled and not active then
 			active = true
-			DisplayNotification("⚠️ RUSH INCOMING", 3)
+			notify("⚠️ RUSH INCOMING", 3)
 			task.delay(3, function() active = false end)
 		end
-
 		if ambush and Config.Entities.AmbushAlert.Enabled and not active then
 			active = true
-			DisplayNotification("⚠️ AMBUSH INCOMING", 3)
+			notify("⚠️ AMBUSH INCOMING", 3)
 			task.delay(3, function() active = false end)
 		end
 	end)
 end
 
-local function MonitorEyes()
+local function startEyesMonitor()
 	return RunService.RenderStepped:Connect(function()
 		if not Config.Entities.EyesProtection.Enabled or not Camera or not RootPart then return end
-
-		for _, instance in ipairs(Workspace:GetDescendants()) do
-			if instance.Name == "Eyes" and instance:IsA("BasePart") then
-				local directionToEyes = (instance.Position - Camera.CFrame.Position).Unit
-				local cameraLookVector = Camera.CFrame.LookVector
-				local dotProduct = directionToEyes:Dot(cameraLookVector)
-
-				if dotProduct > math.cos(math.rad(Config.Entities.EyesProtection.LookAwayAngle)) then
+		
+		for _, obj in ipairs(Workspace:GetDescendants()) do
+			if obj.Name == "Eyes" and obj:IsA("BasePart") then
+				local dirToEyes = (obj.Position - Camera.CFrame.Position).Unit
+				local dot = dirToEyes:Dot(Camera.CFrame.LookVector)
+				if dot > math.cos(math.rad(Config.Entities.EyesProtection.LookAwayAngle)) then
 					if Config.Entities.EyesProtection.AutoLookAway then
-						local perpendicularVector = Vector3.new(cameraLookVector.Z, 0, -cameraLookVector.X).Unit
-						Camera.CFrame = CFrame.new(Camera.CFrame.Position, Camera.CFrame.Position + perpendicularVector)
+						local perp = Vector3.new(Camera.CFrame.LookVector.Z, 0, -Camera.CFrame.LookVector.X).Unit
+						Camera.CFrame = CFrame.new(Camera.CFrame.Position, Camera.CFrame.Position + perp)
 					end
 				end
 			end
@@ -335,320 +304,264 @@ local function MonitorEyes()
 	end)
 end
 
-local function MonitorScreech()
+local function startScreechMonitor()
 	return RunService.Heartbeat:Connect(function()
 		if not Config.Entities.ScreechAlert.Enabled then return end
-
+		
 		local variants = {"Screech", "ScreechRetro", "ScreechRushMode"}
-
-		for _, variant in ipairs(variants) do
-			for _, descendant in ipairs(Workspace:GetDescendants()) do
-				if descendant.Name == variant and not Core.ScreechAlerted[variant] then
-					Core.ScreechAlerted[variant] = true
-					DisplayNotification("👁️ SCREECH SPAWNED - " .. variant, 2)
-
-					if Config.Entities.ScreechAlert.AutoLook and descendant:IsA("BasePart") and RootPart then
-						Camera.CFrame = CFrame.new(Camera.CFrame.Position, descendant.Position)
+		for _, v in ipairs(variants) do
+			for _, d in ipairs(Workspace:GetDescendants()) do
+				if d.Name == v and not Core.ScreechAlerted[v] then
+					Core.ScreechAlerted[v] = true
+					notify("👁️ SCREECH - " .. v, 2)
+					if Config.Entities.ScreechAlert.AutoLook and d:IsA("BasePart") and RootPart then
+						Camera.CFrame = CFrame.new(Camera.CFrame.Position, d.Position)
 					end
 					break
 				end
 			end
 		end
-
-		-- Clear stale alerts
-		for variant, _ in pairs(Core.ScreechAlerted) do
+		
+		for v in pairs(Core.ScreechAlerted) do
 			local found = false
-			for _, descendant in ipairs(Workspace:GetDescendants()) do
-				if descendant.Name == variant then
-					found = true
-					break
-				end
+			for _, d in ipairs(Workspace:GetDescendants()) do
+				if d.Name == v then found = true break end
 			end
-			if not found then
-				Core.ScreechAlerted[variant] = nil
-			end
+			if not found then Core.ScreechAlerted[v] = nil end
 		end
 	end)
 end
 
-local function MonitorFigure()
-	if not Config.FigureAvoidance.Enabled then return end
+local function checkFigure()
+	if not Config.FigureAvoidance.Enabled or not RootPart then return end
+	local rooms = safeFind(Workspace, "CurrentRooms")
+	if not rooms then return end
+	local r50 = safeFind(rooms, "50")
+	if not r50 then return end
 
-	local currentRooms = SafeFind(Workspace, "CurrentRooms")
-	if not currentRooms then return end
-
-	local room50 = SafeFind(currentRooms, "50")
-	if not room50 then return end
-
-	local figureSetup = SafeFind(room50, "FigureSetup") or SafeFind(room50, "FlgureSetup")
-	if not figureSetup then return end
-
-	local figureRig = SafeFind(figureSetup, "FigureRig")
-	if not figureRig then return end
-
-	local hrp = SafeFind(figureRig, "HumanoidRootPart")
-	if hrp and RootPart then
-		local distance = (hrp.Position - RootPart.Position).Magnitude
-		if distance < Config.FigureAvoidance.AvoidRadius then
-			DisplayNotification("⚠️ FIGURE NEARBY (" .. math.floor(distance) .. "m)", 2)
+	local fs = safeFind(r50, "FigureSetup") or safeFind(r50, "FlgureSetup")
+	if not fs then return end
+	local rig = safeFind(fs, "FigureRig")
+	if not rig then return end
+	local hrp = safeFind(rig, "HumanoidRootPart")
+	
+	if hrp then
+		local dist = (hrp.Position - RootPart.Position).Magnitude
+		if dist < Config.FigureAvoidance.AvoidRadius then
+			notify("⚠️ FIGURE NEARBY (" .. math.floor(dist) .. "m)", 2)
 		end
 	end
 end
 
---// GUI Creation
-local function CreateGUI()
-	-- Main Frame
-	local MainFrame = Instance.new("Frame")
-	MainFrame.Name = "MainFrame"
-	MainFrame.Size = UDim2.new(0, 250, 0, 400)
-	MainFrame.Position = UDim2.new(0, 10, 0.5, -200)
-	MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-	MainFrame.BackgroundTransparency = 0.1
-	MainFrame.BorderSizePixel = 0
-	MainFrame.Active = true
-	MainFrame.Draggable = true
-	MainFrame.Parent = ScreenGui
-
-	-- Corner
-	local Corner = Instance.new("UICorner")
-	Corner.CornerRadius = UDim.new(0, 8)
-	Corner.Parent = MainFrame
-
-	-- Title
-	local Title = Instance.new("TextLabel")
-	Title.Name = "Title"
-	Title.Size = UDim2.new(1, 0, 0, 40)
-	Title.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-	Title.BackgroundTransparency = 0.3
-	Title.Text = "🎮 Hobbit Menu"
-	Title.TextColor3 = Color3.fromRGB(255, 255, 255)
-	Title.TextSize = 20
-	Title.Font = Enum.Font.GothamBold
-	Title.Parent = MainFrame
-
-	local TitleCorner = Instance.new("UICorner")
-	TitleCorner.CornerRadius = UDim.new(0, 8)
-	TitleCorner.Parent = Title
-
-	-- Scroll Frame
-	local ScrollFrame = Instance.new("ScrollingFrame")
-	ScrollFrame.Name = "ScrollFrame"
-	ScrollFrame.Size = UDim2.new(1, 0, 1, -45)
-	ScrollFrame.Position = UDim2.new(0, 0, 0, 45)
-	ScrollFrame.BackgroundTransparency = 1
-	ScrollFrame.BorderSizePixel = 0
-	ScrollFrame.ScrollBarThickness = 4
-	ScrollFrame.ScrollBarImageColor3 = Color3.fromRGB(80, 80, 80)
-	ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 650)
-	ScrollFrame.Parent = MainFrame
-
-	local UIListLayout = Instance.new("UIListLayout")
-	UIListLayout.Padding = UDim.new(0, 5)
-	UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-	UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	UIListLayout.Parent = ScrollFrame
-
-	-- Helper function to create section
-	local function CreateSection(name, order)
-		local Section = Instance.new("Frame")
-		Section.Name = name .. "Section"
-		Section.Size = UDim2.new(0.9, 0, 0, 30)
-		Section.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-		Section.BackgroundTransparency = 0.3
-		Section.BorderSizePixel = 0
-		Section.LayoutOrder = order
-		Section.Parent = ScrollFrame
-
-		local SectionCorner = Instance.new("UICorner")
-		SectionCorner.CornerRadius = UDim.new(0, 4)
-		SectionCorner.Parent = Section
-
-		local SectionLabel = Instance.new("TextLabel")
-		SectionLabel.Size = UDim2.new(1, 0, 1, 0)
-		SectionLabel.BackgroundTransparency = 1
-		SectionLabel.Text = name
-		SectionLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-		SectionLabel.TextSize = 16
-		SectionLabel.Font = Enum.Font.GothamBold
-		SectionLabel.Parent = Section
-
-		return Section
+--// GUI
+local function buildGUI()
+	-- УДАЛЯЕМ СТАРЫЙ GUI ЕСЛИ ЕСТЬ
+	if PlayerGui:FindFirstChild("HobbitGUI") then
+		PlayerGui.HobbitGUI:Destroy()
 	end
 
-	-- Helper function to create toggle
-	local function CreateToggle(name, parent, default, callback)
-		local ToggleFrame = Instance.new("Frame")
-		ToggleFrame.Size = UDim2.new(0.9, 0, 0, 25)
-		ToggleFrame.BackgroundTransparency = 1
-		ToggleFrame.BorderSizePixel = 0
-		ToggleFrame.Parent = parent
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "HobbitGUI"
+	gui.ResetOnSpawn = false
+	gui.Parent = PlayerGui
 
-		local Label = Instance.new("TextLabel")
-		Label.Size = UDim2.new(0.7, 0, 1, 0)
-		Label.BackgroundTransparency = 1
-		Label.Text = name
-		Label.TextColor3 = Color3.fromRGB(200, 200, 200)
-		Label.TextSize = 14
-		Label.Font = Enum.Font.Gotham
-		Label.TextXAlignment = Enum.TextXAlignment.Left
-		Label.Parent = ToggleFrame
+	local main = Instance.new("Frame")
+	main.Size = UDim2.new(0, 250, 0, 400)
+	main.Position = UDim2.new(0, 10, 0.5, -200)
+	main.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+	main.BorderSizePixel = 0
+	main.Active = true
+	main.Draggable = true
+	main.Parent = gui
 
-		local ToggleButton = Instance.new("TextButton")
-		ToggleButton.Size = UDim2.new(0, 60, 0, 20)
-		ToggleButton.Position = UDim2.new(1, -60, 0.5, -10)
-		ToggleButton.BackgroundColor3 = default and Color3.fromRGB(0, 170, 0) or Color3.fromRGB(170, 0, 0)
-		ToggleButton.BorderSizePixel = 0
-		ToggleButton.Text = default and "ON" or "OFF"
-		ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-		ToggleButton.TextSize = 12
-		ToggleButton.Font = Enum.Font.GothamBold
-		ToggleButton.Parent = ToggleFrame
+	Instance.new("UICorner").CornerRadius = UDim.new(0, 8).Parent = main
 
-		local ToggleCorner = Instance.new("UICorner")
-		ToggleCorner.CornerRadius = UDim.new(0, 4)
-		ToggleCorner.Parent = ToggleButton
+	local title = Instance.new("TextLabel")
+	title.Size = UDim2.new(1, 0, 0, 35)
+	title.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+	title.Text = "Hobbit Menu v4.0"
+	title.TextColor3 = Color3.fromRGB(255, 255, 255)
+	title.TextSize = 18
+	title.Font = Enum.Font.GothamBold
+	title.Parent = main
 
-		local enabled = default
-		ToggleButton.MouseButton1Click:Connect(function()
-			enabled = not enabled
-			ToggleButton.BackgroundColor3 = enabled and Color3.fromRGB(0, 170, 0) or Color3.fromRGB(170, 0, 0)
-			ToggleButton.Text = enabled and "ON" or "OFF"
-			callback(enabled)
+	local scroll = Instance.new("ScrollingFrame")
+	scroll.Size = UDim2.new(1, -10, 1, -40)
+	scroll.Position = UDim2.new(0, 5, 0, 40)
+	scroll.BackgroundTransparency = 1
+	scroll.BorderSizePixel = 0
+	scroll.ScrollBarThickness = 3
+	scroll.CanvasSize = UDim2.new(0, 0, 0, 550)
+	scroll.Parent = main
+
+	local list = Instance.new("UIListLayout")
+	list.Padding = UDim.new(0, 4)
+	list.Parent = scroll
+
+	local function addSection(text)
+		local sec = Instance.new("TextLabel")
+		sec.Size = UDim2.new(1, -10, 0, 25)
+		sec.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+		sec.Text = "  " .. text
+		sec.TextColor3 = Color3.fromRGB(255, 255, 255)
+		sec.TextSize = 14
+		sec.Font = Enum.Font.GothamBold
+		sec.TextXAlignment = Enum.TextXAlignment.Left
+		sec.Parent = scroll
+		Instance.new("UICorner", sec)
+	end
+
+	local function addToggle(text, default, callback)
+		local frame = Instance.new("Frame")
+		frame.Size = UDim2.new(1, -10, 0, 25)
+		frame.BackgroundTransparency = 1
+		frame.Parent = scroll
+
+		local label = Instance.new("TextLabel")
+		label.Size = UDim2.new(0.65, 0, 1, 0)
+		label.BackgroundTransparency = 1
+		label.Text = "  " .. text
+		label.TextColor3 = Color3.fromRGB(200, 200, 200)
+		label.TextSize = 13
+		label.Font = Enum.Font.Gotham
+		label.TextXAlignment = Enum.TextXAlignment.Left
+		label.Parent = frame
+
+		local btn = Instance.new("TextButton")
+		btn.Size = UDim2.new(0, 60, 0, 20)
+		btn.Position = UDim2.new(1, -65, 0.5, -10)
+		btn.BackgroundColor3 = default and Color3.fromRGB(0, 180, 0) or Color3.fromRGB(180, 0, 0)
+		btn.Text = default and "ON" or "OFF"
+		btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+		btn.TextSize = 12
+		btn.Font = Enum.Font.GothamBold
+		btn.BorderSizePixel = 0
+		btn.Parent = frame
+		Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 3)
+
+		local state = default
+		btn.MouseButton1Click:Connect(function()
+			state = not state
+			btn.BackgroundColor3 = state and Color3.fromRGB(0, 180, 0) or Color3.fromRGB(180, 0, 0)
+			btn.Text = state and "ON" or "OFF"
+			callback(state)
 		end)
 	end
 
 	-- ESP Section
-	local ESPSection = CreateSection("🔍 ESP SETTINGS", 1)
-
-	CreateToggle("Dupe Doors", ScrollFrame, Config.ESP.DupeDoor.Enabled, function(val)
-		Config.ESP.DupeDoor.Enabled = val
-		if not val then
-			ClearAllESP()
-		end
+	addSection("🔍 ESP SETTINGS")
+	addToggle("Dupe Doors", Config.ESP.DupeDoor.Enabled, function(v) 
+		Config.ESP.DupeDoor.Enabled = v
+		if not v then clearESP() end
+	end)
+	addToggle("Keys", Config.ESP.Key.Enabled, function(v) 
+		Config.ESP.Key.Enabled = v
+		if not v then clearESP() end
+	end)
+	addToggle("Snares", Config.ESP.Snare.Enabled, function(v) 
+		Config.ESP.Snare.Enabled = v
+		if not v then clearESP() end
+	end)
+	addToggle("Breakers", Config.ESP.Breaker.Enabled, function(v) 
+		Config.ESP.Breaker.Enabled = v
+		if not v then clearESP() end
+	end)
+	addToggle("Books", Config.ESP.Book.Enabled, function(v) 
+		Config.ESP.Book.Enabled = v
+		if not v then clearESP() end
 	end)
 
-	CreateToggle("Keys", ScrollFrame, Config.ESP.Key.Enabled, function(val)
-		Config.ESP.Key.Enabled = val
-		if not val then ClearAllESP() end
+	-- Entities
+	addSection("👻 ENTITIES")
+	addToggle("Rush Alert", Config.Entities.RushAlert.Enabled, function(v) Config.Entities.RushAlert.Enabled = v end)
+	addToggle("Ambush Alert", Config.Entities.AmbushAlert.Enabled, function(v) Config.Entities.AmbushAlert.Enabled = v end)
+	addToggle("Eyes Protection", Config.Entities.EyesProtection.Enabled, function(v) Config.Entities.EyesProtection.Enabled = v end)
+	addToggle("Screech Alert", Config.Entities.ScreechAlert.Enabled, function(v) Config.Entities.ScreechAlert.Enabled = v end)
+
+	-- Room 50
+	addSection("📚 ROOM 50")
+	addToggle("Figure Avoidance", Config.FigureAvoidance.Enabled, function(v) Config.FigureAvoidance.Enabled = v end)
+
+	-- Player Mods
+	addSection("⚡ PLAYER MODS")
+	addToggle("FullBright", Config.FullBright.Enabled, function(v) 
+		Config.FullBright.Enabled = v
+		toggleFullBright(v)
 	end)
-
-	CreateToggle("Snares", ScrollFrame, Config.ESP.Snare.Enabled, function(val)
-		Config.ESP.Snare.Enabled = val
-		if not val then ClearAllESP() end
+	addToggle("FPS Booster", Config.FPSBooster.Enabled, function(v) 
+		Config.FPSBooster.Enabled = v
+		toggleFPSBoost(v)
 	end)
-
-	CreateToggle("Breakers", ScrollFrame, Config.ESP.Breaker.Enabled, function(val)
-		Config.ESP.Breaker.Enabled = val
-		if not val then ClearAllESP() end
-	end)
-
-	CreateToggle("Books", ScrollFrame, Config.ESP.Book.Enabled, function(val)
-		Config.ESP.Book.Enabled = val
-		if not val then ClearAllESP() end
-	end)
-
-	-- Entities Section
-	local EntitiesSection = CreateSection("👻 ENTITIES", 2)
-
-	CreateToggle("Rush Alert", ScrollFrame, Config.Entities.RushAlert.Enabled, function(val)
-		Config.Entities.RushAlert.Enabled = val
-	end)
-
-	CreateToggle("Ambush Alert", ScrollFrame, Config.Entities.AmbushAlert.Enabled, function(val)
-		Config.Entities.AmbushAlert.Enabled = val
-	end)
-
-	CreateToggle("Eyes Protection", ScrollFrame, Config.Entities.EyesProtection.Enabled, function(val)
-		Config.Entities.EyesProtection.Enabled = val
-	end)
-
-	CreateToggle("Screech Alert", ScrollFrame, Config.Entities.ScreechAlert.Enabled, function(val)
-		Config.Entities.ScreechAlert.Enabled = val
-	end)
-
-	-- Room 50 Section
-	local Room50Section = CreateSection("📚 ROOM 50", 3)
-
-	CreateToggle("Figure Avoidance", ScrollFrame, Config.FigureAvoidance.Enabled, function(val)
-		Config.FigureAvoidance.Enabled = val
-	end)
-
-	-- Player Mods Section
-	local PlayerModsSection = CreateSection("⚡ PLAYER MODS", 4)
-
-	CreateToggle("FullBright", ScrollFrame, Config.FullBright.Enabled, function(val)
-		Config.FullBright.Enabled = val
-		SetupFullBright()
-	end)
-
-	CreateToggle("FPS Booster", ScrollFrame, Config.FPSBooster.Enabled, function(val)
-		Config.FPSBooster.Enabled = val
-		SetupFPSBooster()
-	end)
-
-	CreateToggle("Speed Hack (24)", ScrollFrame, Config.CustomSpeed.Enabled, function(val)
-		Config.CustomSpeed.Enabled = val
+	addToggle("Speed Hack (24)", Config.CustomSpeed.Enabled, function(v) 
+		Config.CustomSpeed.Enabled = v
 		if Humanoid then
-			Humanoid.WalkSpeed = val and Config.CustomSpeed.Speed or 16
+			Humanoid.WalkSpeed = v and Config.CustomSpeed.Speed or 16
 		end
 	end)
 
-	-- Minimize Button
-	local MinimizeButton = Instance.new("TextButton")
-	MinimizeButton.Name = "MinimizeButton"
-	MinimizeButton.Size = UDim2.new(0, 30, 0, 30)
-	MinimizeButton.Position = UDim2.new(1, -35, 0, 5)
-	MinimizeButton.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
-	MinimizeButton.Text = "−"
-	MinimizeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-	MinimizeButton.TextSize = 20
-	MinimizeButton.Font = Enum.Font.GothamBold
-	MinimizeButton.Parent = MainFrame
+	-- Minimize btn
+	local minBtn = Instance.new("TextButton")
+	minBtn.Size = UDim2.new(0, 25, 0, 25)
+	minBtn.Position = UDim2.new(1, -30, 0, 5)
+	minBtn.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
+	minBtn.Text = "_"
+	minBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	minBtn.Font = Enum.Font.GothamBold
+	minBtn.TextSize = 16
+	minBtn.BorderSizePixel = 0
+	minBtn.Parent = main
+	Instance.new("UICorner", minBtn)
 
-	local MinCorner = Instance.new("UICorner")
-	MinCorner.CornerRadius = UDim.new(0, 4)
-	MinCorner.Parent = MinimizeButton
-
-	local minimized = false
-	MinimizeButton.MouseButton1Click:Connect(function()
-		minimized = not minimized
-		if minimized then
-			MainFrame.Size = UDim2.new(0, 250, 0, 40)
-			MinimizeButton.Text = "+"
-		else
-			MainFrame.Size = UDim2.new(0, 250, 0, 400)
-			MinimizeButton.Text = "−"
-		end
+	local min = false
+	minBtn.MouseButton1Click:Connect(function()
+		min = not min
+		main.Size = min and UDim2.new(0, 250, 0, 40) or UDim2.new(0, 250, 0, 400)
+		minBtn.Text = min and "□" or "_"
 	end)
 end
 
---// Periodic Scanning
-local function PeriodicScan()
+--// Main loop
+local function periodicScan()
 	while true do
-		pcall(ScanDupeDoors)
-		pcall(ScanKeys)
-		pcall(ScanSnares)
-		pcall(ScanBreakers)
-		pcall(ScanBooks)
-		pcall(MonitorFigure)
+		pcall(scanDupeDoors)
+		pcall(scanKeys)
+		pcall(scanSnares)
+		pcall(scanBreakers)
+		pcall(scanBooks)
+		pcall(checkFigure)
 		task.wait(1)
 	end
 end
 
---// Initialize
-local function Initialize()
-	CreateGUI()
-	SetupFullBright()
-
-	-- Start monitors
-	table.insert(Core.ActiveConnections, MonitorRushAmbush())
-	table.insert(Core.ActiveConnections, MonitorEyes())
-	table.insert(Core.ActiveConnections, MonitorScreech())
-
-	-- Start periodic scanning
-	task.spawn(PeriodicScan)
-
-	-- Speed monitor
+--// Init
+local function init()
+	buildGUI()
+	toggleFullBright(Config.FullBright.Enabled)
+	
+	table.insert(Core.Connections, startRushMonitor())
+	table.insert(Core.Connections, startEyesMonitor())
+	table.insert(Core.Connections, startScreechMonitor())
+	
 	if Humanoid then
-		Core.SpeedConnection = Humanoid:GetPropertyChangedSignal("WalkSpeed"):Connect(function()
-			if Config.CustomSpeed.Enabled and Humanoid.
+		table.insert(Core.Connections, Humanoid:GetPropertyChangedSignal("WalkSpeed"):Connect(function()
+			if Config.CustomSpeed.Enabled and Humanoid.WalkSpeed ~= Config.CustomSpeed.Speed then
+				Humanoid.WalkSpeed = Config.CustomSpeed.Speed
+			end
+		end))
+	end
+	
+	task.spawn(periodicScan)
+	print("✅ Hobbit GUI v4.0 Loaded! Menu should be visible on screen")
+end
+
+--// Cleanup
+LocalPlayer.CharacterRemoving:Connect(function()
+	clearESP()
+	for _, c in ipairs(Core.Connections) do
+		pcall(function() c:Disconnect() end)
+	end
+	table.clear(Core.Connections)
+end)
+
+-- Start everything
+init()
