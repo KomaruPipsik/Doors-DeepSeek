@@ -1,13 +1,13 @@
---// DOORS SCRIPT - ULTIMATE OPTIMIZED EDITION
+--// DOORS SCRIPT (FULL VERSION & FIXED ESP + RUSH/AMBUSH)
+--// Services
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local CoreGui = game:GetService("CoreGui")
 local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
 local StarterGui = game:GetService("StarterGui")
-local Lighting = game:GetService("Lighting")
-local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local Player = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
@@ -21,20 +21,6 @@ Player.CharacterAdded:Connect(function(char)
 	HumanoidRootPart = char:WaitForChild("HumanoidRootPart")
 end)
 
---// Permanent FPS Boost (Applied once instantly without freezing)
-pcall(function()
-	Lighting.GlobalShadows = false
-	Lighting.FogEnd = 999999
-	for _, v in ipairs(Workspace:GetDescendants()) do
-		if v:IsA("BasePart") then
-			v.Material = Enum.Material.SmoothPlastic
-			v.Reflectance = 0
-		elseif v:IsA("Decal") or v:IsA("Texture") then
-			v.Transparency = 1
-		end
-	end
-end)
-
 --// GUI Creation
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "DoorsGui"
@@ -43,10 +29,15 @@ if syn and syn.protect_gui then
 	syn.protect_gui(ScreenGui)
 	ScreenGui.Parent = CoreGui
 else
-	pcall(function() ScreenGui.Parent = CoreGui end)
-	if ScreenGui.Parent ~= CoreGui then ScreenGui.Parent = Player:WaitForChild("PlayerGui") end
+	pcall(function()
+		ScreenGui.Parent = CoreGui
+	end)
+	if ScreenGui.Parent ~= CoreGui then
+		ScreenGui.Parent = Player:WaitForChild("PlayerGui")
+	end
 end
 
+-- Main Frame
 local MainFrame = Instance.new("Frame")
 MainFrame.Size = UDim2.new(0, 520, 0, 420)
 MainFrame.Position = UDim2.new(0.5, -260, 0.5, -210)
@@ -55,125 +46,169 @@ MainFrame.BorderSizePixel = 0
 MainFrame.Visible = true
 MainFrame.Parent = ScreenGui
 
-local UICorner = Instance.new("UICorner", MainFrame)
+local UICorner = Instance.new("UICorner")
 UICorner.CornerRadius = UDim.new(0, 8)
+UICorner.Parent = MainFrame
 
-local Title = Instance.new("TextLabel", MainFrame)
+local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, 0, 0, 40)
 Title.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
 Title.Text = "DOORS UTILITY MENU (Press RightShift to Open/Close)"
 Title.TextColor3 = Color3.fromRGB(255, 255, 255)
 Title.TextSize = 13
 Title.Font = Enum.Font.SourceSansBold
-Instance.new("UICorner", Title).CornerRadius = UDim.new(0, 8)
+Title.Parent = MainFrame
 
-local ScrollingFrame = Instance.new("ScrollingFrame", MainFrame)
+local TitleCorner = Instance.new("UICorner")
+TitleCorner.CornerRadius = UDim.new(0, 8)
+TitleCorner.Parent = Title
+
+local ScrollingFrame = Instance.new("ScrollingFrame")
 ScrollingFrame.Size = UDim2.new(1, -20, 1, -60)
 ScrollingFrame.Position = UDim2.new(0, 10, 0, 50)
 ScrollingFrame.BackgroundTransparency = 1
-ScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 1800)
+ScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 1400)
 ScrollingFrame.ScrollBarThickness = 6
+ScrollingFrame.Parent = MainFrame
 
-local UIListLayout = Instance.new("UIListLayout", ScrollingFrame)
+local UIListLayout = Instance.new("UIListLayout")
 UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 UIListLayout.Padding = UDim.new(0, 8)
+UIListLayout.Parent = ScrollingFrame
 
+--// Notification System
 local function SendNotification(title, text)
 	pcall(function()
-		StarterGui:SetCore("SendNotification", { Title = title, Text = text, Duration = 3 })
+		StarterGui:SetCore("SendNotification", {
+			Title = title,
+			Text = text,
+			Duration = 3
+		})
 	end)
 end
 
-UserInputService.InputBegan:Connect(function(input)
+--// UI Toggle
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if input.KeyCode == Enum.KeyCode.RightShift then
 		MainFrame.Visible = not MainFrame.Visible
 	end
 end)
 
-local espCache = {}
+--// Universal Helper to create Billboard ESP
 local function CreateOrUpdateESP(parent, nameTag, textStr, textColor)
 	if not parent then return end
 	local targetPart = parent:IsA("BasePart") and parent or parent:FindFirstChildWhichIsA("BasePart")
 	if not targetPart then return end
 	
-	local bill = espCache[targetPart]
-	if not bill or not bill.Parent then
-		bill = targetPart:FindFirstChild(nameTag)
-		if not bill then
-			bill = Instance.new("BillboardGui")
-			bill.Name = nameTag
-			bill.Size = UDim2.new(0, 110, 0, 45)
-			bill.AlwaysOnTop = true
-			bill.StudsOffset = Vector3.new(0, 2.5, 0)
-			
-			local txt = Instance.new("TextLabel", bill)
-			txt.Name = "Text"
-			txt.Size = UDim2.new(1, 0, 1, 0)
-			txt.BackgroundTransparency = 1
-			txt.Text = textStr
-			txt.TextColor3 = textColor
-			txt.TextStrokeTransparency = 0
-			txt.TextSize = 15
-			txt.Font = Enum.Font.SourceSansBold
-			bill.Parent = targetPart
-		end
-		espCache[targetPart] = bill
+	local bill = targetPart:FindFirstChild(nameTag)
+	if not bill then
+		bill = Instance.new("BillboardGui")
+		bill.Name = nameTag
+		bill.Size = UDim2.new(0, 110, 0, 45)
+		bill.AlwaysOnTop = true
+		bill.StudsOffset = Vector3.new(0, 2.5, 0)
+		
+		local txt = Instance.new("TextLabel")
+		txt.Name = "Text"
+		txt.Size = UDim2.new(1, 0, 1, 0)
+		txt.BackgroundTransparency = 1
+		txt.Text = textStr
+		txt.TextColor3 = textColor
+		txt.TextStrokeTransparency = 0
+		txt.TextSize = 15
+		txt.Font = Enum.Font.SourceSansBold
+		txt.Parent = bill
+		
+		bill.Parent = targetPart
 	end
 end
 
+--// UI Builder Helpers
 local function CreateToggle(name, callback)
-	local ToggleBtn = Instance.new("TextButton", ScrollingFrame)
+	local ToggleBtn = Instance.new("TextButton")
 	ToggleBtn.Size = UDim2.new(1, 0, 0, 35)
 	ToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
 	ToggleBtn.Text = name .. ": OFF"
 	ToggleBtn.TextColor3 = Color3.fromRGB(255, 100, 100)
 	ToggleBtn.TextSize = 14
 	ToggleBtn.Font = Enum.Font.SourceSansBold
-	Instance.new("UICorner", ToggleBtn).CornerRadius = UDim.new(0, 6)
+	ToggleBtn.Parent = ScrollingFrame
+	
+	local Corner = Instance.new("UICorner")
+	Corner.CornerRadius = UDim.new(0, 6)
+	Corner.Parent = ToggleBtn
 	
 	local state = false
 	ToggleBtn.MouseButton1Click:Connect(function()
 		state = not state
-		ToggleBtn.Text = name .. (state and ": ON" or ": OFF")
-		ToggleBtn.TextColor3 = state and Color3.fromRGB(100, 255, 100) or Color3.fromRGB(255, 100, 100)
+		if state then
+			ToggleBtn.Text = name .. ": ON"
+			ToggleBtn.TextColor3 = Color3.fromRGB(100, 255, 100)
+		else
+			ToggleBtn.Text = name .. ": OFF"
+			ToggleBtn.TextColor3 = Color3.fromRGB(255, 100, 100)
+		end
 		callback(state)
 	end)
 end
 
 local function CreateSlider(name, min, max, default, callback)
-	local Container = Instance.new("Frame", ScrollingFrame)
+	local Container = Instance.new("Frame")
 	Container.Size = UDim2.new(1, 0, 0, 50)
 	Container.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-	Instance.new("UICorner", Container).CornerRadius = UDim.new(0, 6)
+	Container.Parent = ScrollingFrame
 	
-	local Label = Instance.new("TextLabel", Container)
+	local Corner = Instance.new("UICorner")
+	Corner.CornerRadius = UDim.new(0, 6)
+	Corner.Parent = Container
+	
+	local Label = Instance.new("TextLabel")
 	Label.Size = UDim2.new(1, 0, 0, 20)
 	Label.BackgroundTransparency = 1
 	Label.Text = name .. ": " .. tostring(default)
 	Label.TextColor3 = Color3.fromRGB(255, 255, 255)
 	Label.TextSize = 14
 	Label.Font = Enum.Font.SourceSansBold
+	Label.Parent = Container
 	
-	local SliderBar = Instance.new("TextButton", Container)
+	local SliderBar = Instance.new("TextButton")
 	SliderBar.Size = UDim2.new(0.9, 0, 0, 10)
 	SliderBar.Position = UDim2.new(0.05, 0, 0, 30)
 	SliderBar.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
 	SliderBar.Text = ""
-	Instance.new("UICorner", SliderBar).CornerRadius = UDim.new(0, 4)
+	SliderBar.Parent = Container
 	
-	local Fill = Instance.new("Frame", SliderBar)
+	local SliderCorner = Instance.new("UICorner")
+	SliderCorner.CornerRadius = UDim.new(0, 4)
+	SliderCorner.Parent = SliderBar
+	
+	local Fill = Instance.new("Frame")
 	Fill.Size = UDim2.new((default - min)/(max - min), 0, 1, 0)
 	Fill.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
 	Fill.BorderSizePixel = 0
-	Instance.new("UICorner", Fill).CornerRadius = UDim.new(0, 4)
+	Fill.Parent = SliderBar
+	
+	local FillCorner = Instance.new("UICorner")
+	FillCorner.CornerRadius = UDim.new(0, 4)
+	FillCorner.Parent = Fill
 	
 	local dragging = false
-	SliderBar.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = true end end)
-	UserInputService.InputEnded:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end end)
+	SliderBar.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			dragging = true
+		end
+	end)
+	UserInputService.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			dragging = false
+		end
+	end)
 	UserInputService.InputChanged:Connect(function(input)
 		if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
 			local mousePos = UserInputService:GetMouseLocation().X
-			local percent = math.clamp((mousePos - SliderBar.AbsolutePosition.X) / SliderBar.AbsoluteSize.X, 0, 1)
+			local barPos = SliderBar.AbsolutePosition.X
+			local barSize = SliderBar.AbsoluteSize.X
+			local percent = math.clamp((mousePos - barPos)/barSize, 0, 1)
 			Fill.Size = UDim2.new(percent, 0, 1, 0)
 			local val = math.floor(min + (max - min) * percent)
 			Label.Text = name .. ": " .. tostring(val)
@@ -182,29 +217,41 @@ local function CreateSlider(name, min, max, default, callback)
 	end)
 end
 
---// FEATURES TOGGLES //--
+--// FEATURES IMPLEMENTATION //--
+
+-- 1. Correct & Dupe Doors ESP
 local doorsESPEnabled = false
 CreateToggle("Doors ESP (Correct & Dupe)", function(state) doorsESPEnabled = state end)
 
+-- 2. Rush & Ambush ESP + Notifications
 local rushAmbushESP = false
 local rushNotifications = false
 CreateToggle("Rush & Ambush ESP", function(state) rushAmbushESP = state end)
 CreateToggle("Rush & Ambush Notifications", function(state) rushNotifications = state end)
 
+-- 3. Full Bright
 local fullBrightEnabled = false
 CreateToggle("Full Bright", function(state)
 	fullBrightEnabled = state
-	Lighting.Brightness = state and 2 or 1
-	Lighting.ClockTime = state and 14 or 12
-	Lighting.GlobalShadows = not state
+	if state then
+		game.Lighting.Brightness = 2
+		game.Lighting.ClockTime = 14
+		game.Lighting.GlobalShadows = false
+		game.Lighting.OutdoorAmbient = Color3.fromRGB(255, 255, 255)
+	else
+		game.Lighting.GlobalShadows = true
+	end
 end)
 
+-- 4. Key ESP
 local keyESPEnabled = false
 CreateToggle("Key ESP", function(state) keyESPEnabled = state end)
 
+-- 5. Lever For Gate ESP
 local leverESPEnabled = false
 CreateToggle("Lever For Gate ESP", function(state) leverESPEnabled = state end)
 
+-- 6. Custom Speed & Anti-Teleport
 local customSpeed = 16
 local speedEnabled = false
 local antiTpEnabled = false
@@ -212,125 +259,62 @@ CreateToggle("Enable Custom Speed", function(state) speedEnabled = state end)
 CreateSlider("Speed Value", 16, 40, 16, function(val) customSpeed = val end)
 CreateToggle("Anti-Teleport / Safe Speed", function(state) antiTpEnabled = state end)
 
+-- 7. Eyes Feature (ESP & Anti-Damage)
 local eyesESP = false
 local eyesAntiDamage = false
 CreateToggle("Eyes ESP", function(state) eyesESP = state end)
-CreateToggle("Eyes Anti-Damage (Smart)", function(state) eyesAntiDamage = state end)
+CreateToggle("Eyes Anti-Damage", function(state) eyesAntiDamage = state end)
 
+-- 8. Screech Handler
 local screechAutoTurn = false
 local screechNotif = false
 CreateToggle("Screech Notifications", function(state) screechNotif = state end)
 CreateToggle("Screech Auto-Turn Camera", function(state) screechAutoTurn = state end)
 
+-- 9. Figure ESP & Bypass/Avoidance
 local figureESP = false
 local figureAvoid = false
 local avoidRadius = 15
 CreateToggle("Figure ESP", function(state) figureESP = state end)
-CreateToggle("Figure Avoidance (Smart Height)", function(state) figureAvoid = state end)
+CreateToggle("Figure Avoidance", function(state) figureAvoid = state end)
 CreateSlider("Figure Avoid Radius", 10, 40, 15, function(val) avoidRadius = val end)
 
+-- 10. Room 50 Books ESP
 local booksESP = false
 CreateToggle("Room 50 Books ESP", function(state) booksESP = state end)
 
+-- 11. Snares ESP (90-99)
 local snareESP = false
 CreateToggle("Snares ESP (90-99)", function(state) snareESP = state end)
 
+-- 12. Room 100 Breaker Poles ESP
 local polesESP = false
 CreateToggle("Room 100 Breaker Poles ESP", function(state) polesESP = state end)
 
-local playersESP = false
-CreateToggle("Players ESP & Names", function(state) playersESP = state end)
 
-local autoHiding = false
-CreateToggle("Auto Hide from Rush/Ambush", function(state) autoHiding = state end)
-
-CreateSlider("Camera FOV", 70, 120, 70, function(val) Camera.FieldOfView = val end)
-
--- Hidden Secret Container for 123 command
-local secretContainer = Instance.new("Frame", ScrollingFrame)
-secretContainer.Size = UDim2.new(1, 0, 0, 100)
-secretContainer.BackgroundTransparency = 1
-secretContainer.Visible = false
-
-local function AddSecretToggle(name, callback)
-	local ToggleBtn = Instance.new("TextButton", secretContainer)
-	ToggleBtn.Size = UDim2.new(1, 0, 0, 35)
-	ToggleBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 40)
-	ToggleBtn.Text = name .. ": OFF"
-	ToggleBtn.TextColor3 = Color3.fromRGB(255, 100, 100)
-	ToggleBtn.TextSize = 14
-	ToggleBtn.Font = Enum.Font.SourceSansBold
-	Instance.new("UICorner", ToggleBtn).CornerRadius = UDim.new(0, 6)
-	
-	local state = false
-	ToggleBtn.MouseButton1Click:Connect(function()
-		state = not state
-		ToggleBtn.Text = name .. (state and ": ON" or ": OFF")
-		ToggleBtn.TextColor3 = state and Color3.fromRGB(100, 255, 100) or Color3.fromRGB(255, 100, 100)
-		callback(state)
-	end)
-end
-
-local autoTo50 = false
-local autoTo100 = false
-AddSecretToggle("Auto-Play to Room 50", function(state) autoTo50 = state end)
-AddSecretToggle("Auto-Play to Room 100 (51+)", function(state) autoTo100 = state end)
-
-Player.Chatted:Connect(function(msg)
-	if msg == "123" then
-		secretContainer.Visible = true
-		ScrollingCanvasSize = ScrollingFrame.CanvasSize + UDim2.new(0, 0, 0, 110)
-		SendNotification("Secret Unlocked!", "Auto-Play functions are now available in menu.")
-	end
-end)
-
---// MAIN THROTTLED ENGINE LOOP (Optimized to 0.2s tick rate to completely eliminate any lag or stutter)
+--// MAIN ENGINE TICK LOOP //--
 local notifiedRush = {}
-local clockTimer = 0
-local hidingActive = false
-local hideTimeout = 0
 
-RunService.RenderStepped:Connect(function(dt)
-	clockTimer = clockTimer + dt
-	if clockTimer < 0.2 then return end
-	clockTimer = 0
-
+RunService.RenderStepped:Connect(function()
 	local currentRooms = Workspace:FindFirstChild("CurrentRooms")
 	
-	-- Check active dangers
-	local dangerActive = false
-	for _, obj in ipairs(Workspace:GetChildren()) do
-		if obj.Name == "RushMoving" or obj.Name == "AmbushMoving" or obj.Name == "Eyes" then
-			dangerActive = true
-			break
-		end
-	end
-	for _, name in ipairs({"Screech", "ScreechRetro", "ScreechRushMode"}) do
-		if Workspace:FindFirstChild(name, true) then
-			dangerActive = true
-			break
-		end
-	end
-
-	-- Players ESP
-	if playersESP then
-		for _, p in ipairs(Players:GetPlayers()) do
-			if p ~= Player and p.Character then
-				CreateOrUpdateESP(p.Character, "PlayerESP", p.Name, Color3.fromRGB(0, 170, 255))
-			end
-		end
-	end
-
+	-- Doors & Room-based Items Loop
 	if currentRooms then
 		for _, room in ipairs(currentRooms:GetChildren()) do
+			-- 1. Doors ESP (Correct & Dupe)
 			if doorsESPEnabled then
 				local door = room:FindFirstChild("Door", true)
 				if door then
 					local isDupe = door:FindFirstChild("dupeDoor") or door.Name == "dupeDoor"
-					CreateOrUpdateESP(door, "DoorsESP", isDupe and "DUPE DOOR" or "CORRECT DOOR", isDupe and Color3.fromRGB(255, 0, 0) or Color3.fromRGB(0, 255, 0))
+					if isDupe then
+						CreateOrUpdateESP(door, "DoorsESP", "DUPE DOOR", Color3.fromRGB(255, 0, 0))
+					else
+						CreateOrUpdateESP(door, "DoorsESP", "CORRECT DOOR", Color3.fromRGB(0, 255, 0))
+					end
 				end
 			end
 			
+			-- 5. Lever For Gate ESP
 			if leverESPEnabled then
 				local assets = room:FindFirstChild("Assets")
 				if assets then
@@ -342,6 +326,7 @@ RunService.RenderStepped:Connect(function(dt)
 				end
 			end
 			
+			-- 4. Key ESP
 			if keyESPEnabled then
 				local assets = room:FindFirstChild("Assets")
 				if assets then
@@ -357,6 +342,7 @@ RunService.RenderStepped:Connect(function(dt)
 				end
 			end
 			
+			-- 9. Room 50 Books ESP
 			if booksESP then
 				local assets = room:FindFirstChild("Assets")
 				if assets then
@@ -371,6 +357,7 @@ RunService.RenderStepped:Connect(function(dt)
 				end
 			end
 			
+			-- 11. Snares ESP (90-99)
 			if snareESP then
 				local assets = room:FindFirstChild("Assets")
 				if assets then
@@ -383,6 +370,7 @@ RunService.RenderStepped:Connect(function(dt)
 				end
 			end
 			
+			-- 12. Room 100 Breaker Poles ESP
 			if polesESP then
 				for _, pole in ipairs(room:GetDescendants()) do
 					if pole.Name == "LiveBreakerPolePickup" then
@@ -391,65 +379,19 @@ RunService.RenderStepped:Connect(function(dt)
 				end
 			end
 			
-			-- Figure Avoidance & Height Escape
+			-- 8. Figure ESP & Avoidance
 			local rig = room:FindFirstChild("FigureRig", true) or room:FindFirstChild("FigureSetup", true)
 			if rig then
 				local primaryPart = rig:FindFirstChild("HumanoidRootPart") or rig:FindFirstChildWhichIsA("BasePart")
 				if primaryPart then
-					if figureESP then CreateOrUpdateESP(primaryPart, "FigureESP", "FIGURE", Color3.fromRGB(255, 0, 0)) end
+					if figureESP then
+						CreateOrUpdateESP(primaryPart, "FigureESP", "FIGURE", Color3.fromRGB(255, 0, 0))
+					end
 					if figureAvoid and Humanoid and HumanoidRootPart then
 						local dist = (HumanoidRootPart.Position - primaryPart.Position).Magnitude
 						if dist < avoidRadius then
-							local raycastParams = RaycastParams.new()
-							raycastParams.FilterType = RaycastFilterType.Exclude
-							raycastParams.FilterDescendantsInstances = {Character}
-							local hitForward = Workspace:Raycast(HumanoidRootPart.Position, HumanoidRootPart.CFrame.LookVector * 4, raycastParams)
-							if hitForward or Humanoid.MoveDirection.Magnitude < 0.1 then
-								Humanoid.Jump = true
-							else
-								local dir = (HumanoidRootPart.Position - primaryPart.Position).Unit
-								Humanoid:Move(dir * 2)
-							end
-						end
-					end
-				end
-			end
-			
-			-- Auto-Hiding Logic (Wardrobe detection and distance trigger)
-			if autoHiding and HumanoidRootPart then
-				local rushObj = Workspace:FindFirstChild("RushMoving") or Workspace:FindFirstChild("AmbushMoving")
-				local assets = room:FindFirstChild("Assets")
-				if rushObj then
-					local rushPart = rushObj:FindFirstChildWhichIsA("BasePart")
-					if rushPart then
-						local distanceToRush = (HumanoidRootPart.Position - rushPart.Position).Magnitude
-						if distanceToRush <= 75 and assets then
-							for _, wardrobe in ipairs(assets:GetDescendants()) do
-								if wardrobe.Name == "Wardrobe" then
-									local prompt = wardrobe:FindFirstChildOfClass("ProximityPrompt") or wardrobe:FindFirstChild("Prompt", true)
-									if prompt and not hidingActive then
-										Camera.CFrame = CFrame.new(Camera.CFrame.Position, wardrobe:GetPivot().Position)
-										task.spawn(function()
-											hidingActive = true
-											fireproximityprompt(prompt)
-										end)
-										break
-									end
-								end
-							end
-						elseif distanceToRush > 75 and hidingActive then
-							if hideTimeout == 0 then
-								hideTimeout = tick()
-							elseif tick() - hideTimeout >= 2 then
-								-- Exit wardrobe by jumping or moving away
-								VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.W, false, game)
-								task.wait(0.1)
-								VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.W, false, game)
-								hidingActive = false
-								hideTimeout = 0
-							end
-						else
-							hideTimeout = 0
+							local dir = (HumanoidRootPart.Position - primaryPart.Position).Unit
+							Humanoid:Move(dir * 2)
 						end
 					end
 				end
@@ -457,7 +399,7 @@ RunService.RenderStepped:Connect(function(dt)
 		end
 	end
 	
-	-- Global Entities (Rush & Ambush)
+	-- 2. Rush & Ambush ESP + Notifications (Global Workspace scan)
 	for _, obj in ipairs(Workspace:GetChildren()) do
 		if obj.Name == "RushMoving" or obj.Name == "AmbushMoving" then
 			if rushNotifications and not notifiedRush[obj] then
@@ -469,16 +411,21 @@ RunService.RenderStepped:Connect(function(dt)
 			end
 		end
 		
-		-- Eyes ESP & Smart Anti-Damage (Automatically turns off if Rush/Ambush/Screech are active)
+		-- 7. Eyes ESP & Anti-Damage
 		if obj.Name == "Eyes" then
-			if eyesESP then CreateOrUpdateESP(obj, "EyesESP", "EYES", Color3.fromRGB(150, 0, 255)) end
-			if eyesAntiDamage and not dangerActive and HumanoidRootPart then
-				Camera.CFrame = CFrame.new(Camera.CFrame.Position, Vector3.new(Camera.CFrame.Position.X, Camera.CFrame.Position.Y - 10, Camera.CFrame.Position.Z + 10))
+			if eyesESP then
+				CreateOrUpdateESP(obj, "EyesESP", "EYES", Color3.fromRGB(150, 0, 255))
+			end
+			if eyesAntiDamage and HumanoidRootPart then
+				local direct = obj:FindFirstChild("Hitbox") or obj:FindFirstChildWhichIsA("BasePart")
+				if direct then
+					Camera.CFrame = CFrame.new(Camera.CFrame.Position, Vector3.new(Camera.CFrame.Position.X, Camera.CFrame.Position.Y - 10, Camera.CFrame.Position.Z + 10))
+				end
 			end
 		end
 	end
 	
-	-- Screech Global Handler
+	-- 8. Screech Global Handler
 	for _, entityName in ipairs({"Screech", "ScreechRetro", "ScreechRushMode"}) do
 		local screech = Workspace:FindFirstChild(entityName, true)
 		if screech then
@@ -488,13 +435,15 @@ RunService.RenderStepped:Connect(function(dt)
 			end
 			if screechAutoTurn then
 				local part = screech:FindFirstChild("HumanoidRootPart") or screech:FindFirstChildWhichIsA("BasePart")
-				if part then Camera.CFrame = CFrame.new(Camera.CFrame.Position, part.Position) end
+				if part then
+					Camera.CFrame = CFrame.new(Camera.CFrame.Position, part.Position)
+				end
 			end
 		end
 	end
 end)
 
--- Speed & Anti-Teleport Loop
+-- 6. Speed & Anti-Teleport Loop
 local lastPosition = Vector3.new()
 RunService.Stepped:Connect(function()
 	if speedEnabled and Humanoid and HumanoidRootPart then
@@ -511,4 +460,4 @@ RunService.Stepped:Connect(function()
 	end
 end)
 
-SendNotification("Doors Script Loaded", "Optimized & Ready. Press RightShift to toggle menu.")
+SendNotification("Doors Script Loaded", "Press RightShift to open/close menu.")
