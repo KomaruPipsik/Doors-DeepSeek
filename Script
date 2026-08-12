@@ -1,143 +1,96 @@
---[[
-    DOORS FULL UTILITY HUB [STABLE VERSION]
-    Логирование: F9
-    Клавиша управления меню: RightShift
---]]
-
 local Players = game:GetService("Players")
-local Workspace = game:GetService("Workspace")
-local Lighting = game:GetService("Lighting")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
+local CoreGui = game:GetService("CoreGui")
 local UserInputService = game:GetService("UserInputService")
-local LocalPlayer = Players.LocalPlayer
 
--- Логгер
-local function Log(msg) print("[DOORS_HUB]: " .. msg) end
-local function Error(msg) warn("[DOORS_ERROR]: " .. msg) end
+local player = Players.LocalPlayer
 
-Log("Инициализация скрипта...")
-
--- Конфигурация
-local Config = {
-    Speed = 20, SpeedEnabled = false,
-    FullBright = false,
-    ESP = { Dupe = true, Keys = true, Snares = true, Breaker = true, Figure = true, Books = true },
-    Utils = { Eyes = true, Screech = true }
-}
-
--- 1. СИСТЕМА УВЕДОМЛЕНИЙ
-local NotifyGui = Instance.new("ScreenGui", LocalPlayer:WaitForChild("PlayerGui"))
-NotifyGui.Name = "NotifyHub"
-NotifyGui.DisplayOrder = 2000
-
-local function Notify(msg, duration)
-    local frame = Instance.new("Frame", NotifyGui)
-    frame.Size = UDim2.new(0, 300, 0, 50)
-    frame.Position = UDim2.new(0.5, -150, 0, -60)
-    frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    frame.BorderSizePixel = 0
-    
-    local lbl = Instance.new("TextLabel", frame)
-    lbl.Size = UDim2.new(1, 0, 1, 0)
-    lbl.Text = msg
-    lbl.TextColor3 = Color3.new(1, 1, 1)
-    lbl.BackgroundTransparency = 1
-    
-    TweenService:Create(frame, TweenInfo.new(0.5), {Position = UDim2.new(0.5, -150, 0, 20)}):Play()
-    task.wait(duration or 3)
-    TweenService:Create(frame, TweenInfo.new(0.5), {Position = UDim2.new(0.5, -150, 0, -60)}):Play()
-    task.delay(0.6, function() frame:Destroy() end)
-end
-
--- 2. ГЛАВНОЕ МЕНЮ
-local MainGui = Instance.new("ScreenGui", LocalPlayer:WaitForChild("PlayerGui"))
-MainGui.Name = "MainHub"
-MainGui.DisplayOrder = 9999
-
-local MainFrame = Instance.new("Frame", MainGui)
-MainFrame.Size = UDim2.new(0, 250, 0, 400)
-MainFrame.Position = UDim2.new(0.5, -125, 0.5, -200)
-MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-MainFrame.Active = true
-MainFrame.Draggable = true
-
-local List = Instance.new("UIListLayout", MainFrame)
-List.Padding = UDim.new(0, 5)
-
-local function AddToggle(text, callback)
-    local btn = Instance.new("TextButton", MainFrame)
-    btn.Size = UDim2.new(1, 0, 0, 35)
-    btn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-    btn.Text = text
-    btn.TextColor3 = Color3.new(1, 1, 1)
-    local state = false
-    btn.MouseButton1Click:Connect(function()
-        state = not state
-        btn.BackgroundColor3 = state and Color3.fromRGB(0, 100, 0) or Color3.fromRGB(40, 40, 40)
-        callback(state)
-    end)
-end
-
--- Кнопки
-AddToggle("DupeDoor ESP", function(v) Config.ESP.Dupe = v end)
-AddToggle("Keys ESP", function(v) Config.ESP.Keys = v end)
-AddToggle("Snares ESP", function(v) Config.ESP.Snares = v end)
-AddToggle("Breaker ESP", function(v) Config.ESP.Breaker = v end)
-AddToggle("Figure/Books ESP", function(v) Config.ESP.Figure = v; Config.ESP.Books = v end)
-AddToggle("FullBright", function(v) Config.FullBright = v; Lighting.Brightness = v and 2 or 1 end)
-AddToggle("Speed (20)", function(v) Config.SpeedEnabled = v end)
-
--- 3. ЛОГИКА (ESP, Entities, Room50)
-local function AddHighlight(obj)
-    if not obj:FindFirstChild("H") then
-        local h = Instance.new("Highlight", obj)
-        h.Name = "H"
-        h.FillColor = Color3.new(1, 0, 0)
-    end
-end
-
--- Цикл сканирования
-task.spawn(function()
-    while true do
-        pcall(function()
-            local rooms = Workspace:FindFirstChild("CurrentRooms")
-            if rooms then
-                for _, r in pairs(rooms:GetChildren()) do
-                    if Config.ESP.Dupe then
-                        local dd = r:FindFirstChild("dupeDoor", true)
-                        if dd then AddHighlight(dd) end
-                    end
-                    -- (Добавь здесь остальную логику ESP для ключей и т.д.)
-                end
-            end
-        end)
-        task.wait(2)
-    end
+-- Определение контейнера (CoreGui или PlayerGui)
+local targetParent = nil
+local success = pcall(function()
+	targetParent = CoreGui
 end)
 
--- Монитор сущностей
-RunService.RenderStepped:Connect(function()
-    if Config.Utils.Eyes then
-        local eyes = Workspace:FindFirstChild("Eyes")
-        if eyes and eyes:FindFirstChild("Head") then
-            local dot = Camera.CFrame.LookVector:Dot((eyes.Head.Position - Camera.CFrame.Position).Unit)
-            if dot > 0.5 then Camera.CFrame = CFrame.lookAt(Camera.CFrame.Position, Camera.CFrame.Position - Vector3.new(0,0,1)) end
-        end
-    end
-    if Config.SpeedEnabled then
-        local h = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid")
-        if h then h.WalkSpeed = Config.Speed end
-    end
+if not success or not targetParent then
+	targetParent = player:FindFirstChildOfClass("PlayerGui") or player:WaitForChild("PlayerGui", 5)
+end
+
+-- Удаление старой копии GUI при повторном запуске
+if targetParent and targetParent:FindFirstChild("DoorsBaseMenu") then
+	targetParent.DoorsBaseMenu:Destroy()
+end
+
+-- Создание ScreenGui
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "DoorsBaseMenu"
+screenGui.ResetOnSpawn = false
+screenGui.DisplayOrder = 999999
+screenGui.Parent = targetParent
+
+-- Главная рамка (Центр экрана)
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 320, 0, 200)
+mainFrame.Position = UDim2.new(0.5, -160, 0.5, -100)
+mainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+mainFrame.BorderColor3 = Color3.fromRGB(0, 170, 255)
+mainFrame.BorderSizePixel = 2
+mainFrame.Active = true
+mainFrame.Draggable = true
+mainFrame.Visible = true
+mainFrame.Parent = screenGui
+
+-- Шапка
+local titleBar = Instance.new("Frame")
+titleBar.Size = UDim2.new(1, 0, 0, 35)
+titleBar.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+titleBar.BorderSizePixel = 0
+titleBar.Parent = mainFrame
+
+local titleText = Instance.new("TextLabel")
+titleText.Size = UDim2.new(1, -10, 1, 0)
+titleText.Position = UDim2.new(0, 10, 0, 0)
+titleText.BackgroundTransparency = 1
+titleText.Font = Enum.Font.SourceSansBold
+titleText.Text = "DOORS MENU"
+titleText.TextColor3 = Color3.fromRGB(255, 255, 255)
+titleText.TextSize = 18
+titleText.TextXAlignment = Enum.TextXAlignment.Left
+titleText.Parent = titleBar
+
+-- Информационный текст
+local statusText = Instance.new("TextLabel")
+statusText.Size = UDim2.new(1, -20, 0, 50)
+statusText.Position = UDim2.new(0, 10, 0, 45)
+statusText.BackgroundTransparency = 1
+statusText.Font = Enum.Font.SourceSans
+statusText.Text = "МЕНЮ ОТОБРАЖАЕТСЯ\nСкрытие: RightShift или Insert"
+statusText.TextColor3 = Color3.fromRGB(0, 255, 127)
+statusText.TextSize = 16
+statusText.TextWrapped = true
+statusText.Parent = mainFrame
+
+-- Тестовая кнопка
+local testBtn = Instance.new("TextButton")
+testBtn.Size = UDim2.new(1, -40, 0, 40)
+testBtn.Position = UDim2.new(0, 20, 0, 110)
+testBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+testBtn.BorderColor3 = Color3.fromRGB(80, 80, 100)
+testBtn.Font = Enum.Font.SourceSansBold
+testBtn.Text = "Проверка клика"
+testBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+testBtn.TextSize = 16
+testBtn.Parent = mainFrame
+
+testBtn.MouseButton1Click:Connect(function()
+	testBtn.Text = "Клик работает!"
+	testBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 75)
 end)
 
--- Управление
-UserInputService.InputBegan:Connect(function(input)
-    if input.KeyCode == Enum.KeyCode.RightShift then
-        MainFrame.Visible = not MainFrame.Visible
-    end
+-- Переключение видимости по клавишам RightShift / Insert
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if input.KeyCode == Enum.KeyCode.RightShift or input.KeyCode == Enum.KeyCode.Insert then
+		mainFrame.Visible = not mainFrame.Visible
+	end
 end)
 
-Log("Инициализация завершена.")
-Notify("Скрипт загружен! Нажми RightShift.", 5)
+print("[DoorsMenu] UI успешно заинжекчен в: " .. tostring(targetParent:GetFullName()))
