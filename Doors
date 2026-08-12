@@ -1,7 +1,6 @@
---// DOORS SCRIPT v2.0 — FIXED LAGS + NEW FEATURES
---// Оптимизировано: ESP создаётся один раз через событие, не каждый кадр
+--// DOORS SCRIPT v2.1
+--// Fixes: doors ESP only on correct door, seek removed, FOV loop, rush/ambush teleport, item outlines
 
---// Services
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
@@ -43,25 +42,20 @@ local snareESP = false
 local polesESP = false
 local crucifixESP = false
 local itemsESP = false
-local seekAutoRun = false
 local rushRoofEnabled = false
 local ambushDownEnabled = false
 local playerESPEnabled = false
 local customFOV = 70
 
---// Seek state
-local seekActive = false
-local seekMoveLoop = nil
-local originalCFrame = nil
-
---// Rush/Ambush roof state
+--// Rush/Ambush state
 local rushOnRoof = false
 local ambushDown = false
-local rushSavedY = nil
-local roofY = 200 -- высота крыши (подбери под карту)
-local floorY = -50 -- низ (подбери под карту)
+local rushSavedPos = nil
+local ambushSavedPos = nil
+-- Высоты: подбери под карту если надо
+local roofY = 300
+local floorY = -200
 
---// Уведомления
 local notifiedRush = {}
 
 local function SendNotification(title, text)
@@ -97,14 +91,13 @@ Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
 local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, 0, 0, 38)
 Title.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
-Title.Text = "🚪 DOORS UTILITY v2.0  |  RightShift = открыть/закрыть"
+Title.Text = "🚪 DOORS UTILITY v2.1  |  RightShift = открыть/закрыть"
 Title.TextColor3 = Color3.fromRGB(220, 220, 220)
 Title.TextSize = 12
 Title.Font = Enum.Font.SourceSansBold
 Title.Parent = MainFrame
 Instance.new("UICorner", Title).CornerRadius = UDim.new(0, 10)
 
--- Drag
 local draggingFrame = false
 local dragStart, startPos
 Title.InputBegan:Connect(function(i)
@@ -128,7 +121,7 @@ local ScrollingFrame = Instance.new("ScrollingFrame")
 ScrollingFrame.Size = UDim2.new(1, -16, 1, -50)
 ScrollingFrame.Position = UDim2.new(0, 8, 0, 44)
 ScrollingFrame.BackgroundTransparency = 1
-ScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 1900)
+ScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 1800)
 ScrollingFrame.ScrollBarThickness = 5
 ScrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(80, 80, 80)
 ScrollingFrame.Parent = MainFrame
@@ -144,7 +137,6 @@ UserInputService.InputBegan:Connect(function(input, gp)
 	end
 end)
 
---// UI Helpers
 local function SectionLabel(text)
 	local lbl = Instance.new("TextLabel")
 	lbl.Size = UDim2.new(1, 0, 0, 24)
@@ -169,7 +161,6 @@ local function CreateToggle(name, callback)
 	btn.TextXAlignment = Enum.TextXAlignment.Left
 	btn.Parent = ScrollingFrame
 	Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
-
 	local state = false
 	btn.MouseButton1Click:Connect(function()
 		state = not state
@@ -187,13 +178,12 @@ local function CreateToggle(name, callback)
 	return btn
 end
 
-local function CreateSlider(name, min, max, default, callback)
+local function CreateSlider(name, minV, maxV, default, callback)
 	local Container = Instance.new("Frame")
 	Container.Size = UDim2.new(1, 0, 0, 52)
 	Container.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 	Container.Parent = ScrollingFrame
 	Instance.new("UICorner", Container).CornerRadius = UDim.new(0, 6)
-
 	local Label = Instance.new("TextLabel")
 	Label.Size = UDim2.new(1, -8, 0, 22)
 	Label.Position = UDim2.new(0, 8, 0, 2)
@@ -204,7 +194,6 @@ local function CreateSlider(name, min, max, default, callback)
 	Label.Font = Enum.Font.SourceSansBold
 	Label.TextXAlignment = Enum.TextXAlignment.Left
 	Label.Parent = Container
-
 	local SliderBar = Instance.new("TextButton")
 	SliderBar.Size = UDim2.new(0.92, 0, 0, 10)
 	SliderBar.Position = UDim2.new(0.04, 0, 0, 34)
@@ -212,14 +201,12 @@ local function CreateSlider(name, min, max, default, callback)
 	SliderBar.Text = ""
 	SliderBar.Parent = Container
 	Instance.new("UICorner", SliderBar).CornerRadius = UDim.new(0, 4)
-
 	local Fill = Instance.new("Frame")
-	Fill.Size = UDim2.new((default - min)/(max - min), 0, 1, 0)
+	Fill.Size = UDim2.new((default - minV)/(maxV - minV), 0, 1, 0)
 	Fill.BackgroundColor3 = Color3.fromRGB(60, 130, 255)
 	Fill.BorderSizePixel = 0
 	Fill.Parent = SliderBar
 	Instance.new("UICorner", Fill).CornerRadius = UDim.new(0, 4)
-
 	local dragging = false
 	SliderBar.InputBegan:Connect(function(i)
 		if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = true end
@@ -234,33 +221,29 @@ local function CreateSlider(name, min, max, default, callback)
 			local bw = SliderBar.AbsoluteSize.X
 			local pct = math.clamp((mx - bx) / bw, 0, 1)
 			Fill.Size = UDim2.new(pct, 0, 1, 0)
-			local val = math.floor(min + (max - min) * pct)
+			local val = math.floor(minV + (maxV - minV) * pct)
 			Label.Text = name .. ": " .. tostring(val)
 			callback(val)
 		end
 	end)
 end
 
---// ========================
 --// GUI Sections
---// ========================
-
-SectionLabel("🔑  Предметы и двери")
-CreateToggle("Двери ESP (правильная / дубль)", function(s) doorsESPEnabled = s refreshDoorsESP() end)
-CreateToggle("Ключ ESP", function(s) keyESPEnabled = s refreshKeysESP() end)
+SectionLabel("🚪  Двери и предметы")
+CreateToggle("Двери ESP (только правильная дверь)", function(s) doorsESPEnabled = s refreshDoorsESP() end)
+CreateToggle("Ключ ESP + обводка", function(s) keyESPEnabled = s refreshKeysESP() end)
 CreateToggle("Рычаг для ворот ESP", function(s) leverESPEnabled = s end)
-CreateToggle("Книги (комната 50) ESP", function(s) booksESP = s refreshBooksESP() end)
-CreateToggle("Крест (Crucifix) ESP", function(s) crucifixESP = s refreshCrucifixESP() end)
-CreateToggle("Предметы в столе (витамины и т.д.) ESP", function(s) itemsESP = s refreshItemsESP() end)
+CreateToggle("Книги (комната 50) ESP + обводка", function(s) booksESP = s refreshBooksESP() end)
+CreateToggle("Крест (Crucifix) ESP + обводка", function(s) crucifixESP = s refreshCrucifixESP() end)
+CreateToggle("Предметы в столе ESP + обводка", function(s) itemsESP = s refreshItemsESP() end)
 CreateToggle("Ловушки (комн. 90-99) ESP", function(s) snareESP = s end)
 CreateToggle("Рычаги (комн. 100) ESP", function(s) polesESP = s end)
 
 SectionLabel("👁  Монстры")
 CreateToggle("Rush & Ambush ESP", function(s) rushAmbushESP = s end)
 CreateToggle("Rush & Ambush Уведомления", function(s) rushNotifications = s end)
-CreateToggle("Rush → телепорт на крышу", function(s) rushRoofEnabled = s end)
-CreateToggle("Ambush → телепорт вниз", function(s) ambushDownEnabled = s end)
-CreateToggle("Seek авто-уклон (вниз под пол)", function(s) seekAutoRun = s if not s then stopSeekLoop() end end)
+CreateToggle("Rush → телепорт вверх (пока идёт)", function(s) rushRoofEnabled = s end)
+CreateToggle("Ambush → телепорт вниз (пока идёт)", function(s) ambushDownEnabled = s end)
 CreateToggle("Eyes ESP", function(s) eyesESP = s end)
 CreateToggle("Eyes Анти-урон (камера вниз)", function(s) eyesAntiDamage = s end)
 CreateToggle("Screech Уведомления", function(s) screechNotif = s end)
@@ -273,17 +256,25 @@ SectionLabel("🏃  Игрок")
 CreateToggle("Кастомная скорость", function(s) speedEnabled = s end)
 CreateSlider("Скорость", 16, 60, 16, function(v) customSpeed = v end)
 CreateToggle("Анти-телепорт", function(s) antiTpEnabled = s end)
-CreateSlider("FOV", 50, 120, 70, function(v)
-	customFOV = v
-	Camera.FieldOfView = v
-end)
+CreateSlider("FOV", 50, 120, 70, function(v) customFOV = v end)
 
 SectionLabel("👥  Игроки")
-CreateToggle("ESP игроков (ники + подсветка)", function(s) playerESPEnabled = s end)
+CreateToggle("ESP игроков (ники + обводка)", function(s)
+	playerESPEnabled = s
+	if not s then
+		for _, plr in ipairs(Players:GetPlayers()) do
+			if plr ~= Player and plr.Character then
+				local hrp = plr.Character:FindFirstChild("HumanoidRootPart")
+				if hrp then RemoveESP(hrp, "PlayerESP") end
+				local hl = plr.Character:FindFirstChild("PlayerHL")
+				if hl then hl:Destroy() end
+			end
+		end
+	end
+end)
 
 SectionLabel("💡  Прочее")
 CreateToggle("Full Bright", function(s)
-	fullBrightEnabled = s
 	if s then
 		game.Lighting.Brightness = 2
 		game.Lighting.ClockTime = 14
@@ -298,22 +289,24 @@ CreateToggle("Full Bright", function(s)
 end)
 
 --// ========================
---// ESP CORE — БЕЗ ЛАГОВ
---// Создаём Billboard один раз, не каждый кадр
+--// ESP CORE
 --// ========================
+local function GetPrimaryPart(obj)
+	if obj:IsA("BasePart") then return obj end
+	return obj:FindFirstChildWhichIsA("BasePart", true)
+end
 
+-- Billboard (текст над объектом)
 local function MakeESP(part, tag, text, color)
 	if not part or not part.Parent then return end
-	if part:FindFirstChild(tag) then return end -- уже есть, не создаём
-	
+	if part:FindFirstChild(tag) then return end
 	local bill = Instance.new("BillboardGui")
 	bill.Name = tag
-	bill.Size = UDim2.new(0, 120, 0, 40)
+	bill.Size = UDim2.new(0, 130, 0, 40)
 	bill.AlwaysOnTop = true
-	bill.StudsOffset = Vector3.new(0, 3, 0)
+	bill.StudsOffset = Vector3.new(0, 3.5, 0)
 	bill.Adornee = part
 	bill.Parent = part
-
 	local lbl = Instance.new("TextLabel")
 	lbl.Size = UDim2.new(1, 0, 1, 0)
 	lbl.BackgroundTransparency = 1
@@ -327,295 +320,263 @@ local function MakeESP(part, tag, text, color)
 end
 
 local function RemoveESP(part, tag)
-	if part then
-		local b = part:FindFirstChild(tag)
-		if b then b:Destroy() end
-	end
+	if not part then return end
+	local b = part:FindFirstChild(tag)
+	if b then b:Destroy() end
 end
 
-local function GetPrimaryPart(obj)
-	if obj:IsA("BasePart") then return obj end
-	return obj:FindFirstChildWhichIsA("BasePart")
+-- SelectionBox обводка на модель целиком
+local function MakeOutline(model, tag, color)
+	-- Ищем уже существующую обводку
+	local existingParent = model:FindFirstChild(tag .. "_outline")
+	if existingParent then return end
+
+	-- Маркер чтобы не дублировать
+	local marker = Instance.new("BoolValue")
+	marker.Name = tag .. "_outline"
+	marker.Parent = model
+
+	local box = Instance.new("SelectionBox")
+	box.Name = tag .. "_box"
+	box.Adornee = model
+	box.Color3 = color
+	box.LineThickness = 0.05
+	box.SurfaceTransparency = 0.75
+	box.SurfaceColor3 = color
+	box.Parent = model
+end
+
+local function RemoveOutline(model, tag)
+	if not model then return end
+	local m = model:FindFirstChild(tag .. "_outline")
+	if m then m:Destroy() end
+	local b = model:FindFirstChild(tag .. "_box")
+	if b then b:Destroy() end
 end
 
 --// ========================
---// EVENT-BASED ESP (не лагает)
+--// Двери ESP — только правильная дверь
+--// Логика: правильная дверь в DOORS — это та что НЕ помечена как дубль
+--// И у неё есть компонент "OpenDoor" или она называется "Door" (не dupeDoor)
 --// ========================
+local function HandleDoor(door)
+	-- Проверяем: это дубль дверь?
+	local isDupe = door.Name == "dupeDoor"
+		or door:FindFirstChild("dupeDoor") ~= nil
+		or door:GetAttribute("isDupe") == true
 
--- Отслеживаем CurrentRooms
-local currentRooms = Workspace:WaitForChild("CurrentRooms", 10)
-local roomConnections = {}
-
-local function HandleDescendant(desc, room)
-	-- Двери
-	if desc.Name == "Door" or desc.Name == "dupeDoor" then
-		local isDupe = desc:FindFirstChild("dupeDoor") or desc.Name == "dupeDoor"
-		local part = GetPrimaryPart(desc)
+	-- Правильную дверь помечаем, дубль — нет
+	if not isDupe then
+		local part = GetPrimaryPart(door)
 		if part then
-			if doorsESPEnabled then
-				local tag = isDupe and "ДУБЛЬ ДВЕРЬ" or "ПРАВИЛЬНАЯ ДВЕРЬ"
-				local col = isDupe and Color3.fromRGB(255, 60, 60) or Color3.fromRGB(60, 255, 60)
-				MakeESP(part, "DoorsESP", tag, col)
-			end
-			desc.AncestryChanged:Connect(function()
-				if not desc.Parent then RemoveESP(part, "DoorsESP") end
-			end)
+			MakeESP(part, "DoorsESP", "✅ ПРАВИЛЬНАЯ", Color3.fromRGB(60, 255, 60))
 		end
-	end
-
-	-- Ключ (KeyObtain прямо в Assets или внутри мебели)
-	if desc.Name == "KeyObtain" then
-		local part = GetPrimaryPart(desc) or desc
-		if part and keyESPEnabled then
-			MakeESP(part, "KeyESP", "🔑 КЛЮЧ", Color3.fromRGB(255, 230, 0))
-		end
-		desc.AncestryChanged:Connect(function()
-			if not desc.Parent then RemoveESP(part, "KeyESP") end
+		door.AncestryChanged:Connect(function()
+			if not door.Parent then RemoveESP(part, "DoorsESP") end
 		end)
 	end
+end
 
-	-- Ключ из Dresser / DrawerContainer
-	if desc.Name == "Dresser" or desc.Name == "DrawerContainer" then
-		local kObt = desc:FindFirstChild("KeyObtain", true)
-		if kObt then
-			local hit = kObt:FindFirstChild("Hitbox") or kObt:FindFirstChild("KeyHitbox") or kObt
-			local part = GetPrimaryPart(hit) or hit
-			if part and keyESPEnabled then
-				MakeESP(part, "KeyESP", "🔑 КЛЮЧ", Color3.fromRGB(255, 230, 0))
-			end
-			desc.AncestryChanged:Connect(function()
-				if not desc.Parent then RemoveESP(part, "KeyESP") end
-			end)
+--// Предметы с обводкой
+local function MakeItemESP(model, tag, label, color)
+	local part = GetPrimaryPart(model)
+	if not part then return end
+	MakeESP(part, tag, label, color)
+	MakeOutline(model, tag, color)
+	model.AncestryChanged:Connect(function()
+		if not model.Parent then
+			RemoveESP(part, tag)
+			RemoveOutline(model, tag)
 		end
+	end)
+end
+
+local function RemoveItemESP(model, tag)
+	local part = GetPrimaryPart(model)
+	RemoveESP(part, tag)
+	RemoveOutline(model, tag)
+end
+
+--// Обработчик потомков комнаты
+local function HandleDescendant(desc)
+	-- Двери
+	if desc.Name == "Door" then
+		if doorsESPEnabled then HandleDoor(desc) end
+		return
+	end
+
+	-- Ключ — KeyObtain или в мебели
+	if desc.Name == "KeyObtain" and keyESPEnabled then
+		MakeItemESP(desc, "KeyESP", "🔑 КЛЮЧ", Color3.fromRGB(255, 220, 0))
+		return
+	end
+
+	-- Ключ в Dresser / DrawerContainer
+	if (desc.Name == "Dresser" or desc.Name == "DrawerContainer") and keyESPEnabled then
+		local k = desc:FindFirstChild("KeyObtain", true)
+		if k then
+			MakeItemESP(k, "KeyESP", "🔑 КЛЮЧ", Color3.fromRGB(255, 220, 0))
+		end
+		return
 	end
 
 	-- Рычаг
 	if desc.Name == "LeverForGate" and leverESPEnabled then
 		local part = GetPrimaryPart(desc)
-		if part then
-			MakeESP(part, "LeverESP", "🔧 РЫЧАГ", Color3.fromRGB(255, 255, 0))
-			desc.AncestryChanged:Connect(function()
-				if not desc.Parent then RemoveESP(part, "LeverESP") end
-			end)
-		end
+		if part then MakeESP(part, "LeverESP", "🔧 РЫЧАГ", Color3.fromRGB(255, 255, 0)) end
+		return
 	end
 
-	-- Книги (комн. 50)
+	-- Книги
 	if desc.Name == "LiveHintBook" and booksESP then
-		local part = GetPrimaryPart(desc) or desc
-		MakeESP(part, "BookESP", "📖 КНИГА", Color3.fromRGB(0, 220, 255))
-		desc.AncestryChanged:Connect(function()
-			if not desc.Parent then RemoveESP(part, "BookESP") end
-		end)
+		MakeItemESP(desc, "BookESP", "📖 КНИГА", Color3.fromRGB(0, 210, 255))
+		return
 	end
 
-	-- Crucifix (крест)
+	-- Crucifix (крест — сама модель CrucifixWall)
 	if desc.Name == "CrucifixWall" and crucifixESP then
-		local part = GetPrimaryPart(desc) or desc
-		MakeESP(part, "CrucifixESP", "✝ КРЕСТ", Color3.fromRGB(255, 200, 50))
-		desc.AncestryChanged:Connect(function()
-			if not desc.Parent then RemoveESP(part, "CrucifixESP") end
-		end)
+		MakeItemESP(desc, "CrucifixESP", "✝ КРЕСТ", Color3.fromRGB(255, 200, 50))
+		return
 	end
 
-	-- Предметы в Rolltop_Desk (витамины и т.д., исключаем Lid)
+	-- Предметы в столе (RolltopContainer, всё кроме Lid)
 	if desc.Name == "RolltopContainer" and itemsESP then
 		for _, child in ipairs(desc:GetChildren()) do
 			if child.Name ~= "Lid" then
-				local part = GetPrimaryPart(child) or child
-				if part then
-					MakeESP(part, "ItemESP", "💊 " .. child.Name, Color3.fromRGB(180, 255, 100))
-				end
+				MakeItemESP(child, "ItemESP", "💊 " .. child.Name, Color3.fromRGB(160, 255, 80))
 			end
 		end
 		desc.ChildAdded:Connect(function(child)
 			if child.Name ~= "Lid" and itemsESP then
-				local part = GetPrimaryPart(child) or child
-				if part then MakeESP(part, "ItemESP", "💊 " .. child.Name, Color3.fromRGB(180, 255, 100)) end
+				MakeItemESP(child, "ItemESP", "💊 " .. child.Name, Color3.fromRGB(160, 255, 80))
 			end
 		end)
+		return
 	end
 
-	-- Ловушки (90-99)
+	-- Ловушки
 	if desc.Name == "Snare" and snareESP then
 		local base = desc:FindFirstChild("SnareBase") or desc
 		local part = GetPrimaryPart(base) or base
 		MakeESP(part, "SnareESP", "⚠ ЛОВУШКА", Color3.fromRGB(255, 128, 0))
-		desc.AncestryChanged:Connect(function()
-			if not desc.Parent then RemoveESP(part, "SnareESP") end
-		end)
+		return
 	end
 
-	-- Рычаги (100)
+	-- Рычаги 100
 	if desc.Name == "LiveBreakerPolePickup" and polesESP then
 		local part = GetPrimaryPart(desc) or desc
 		MakeESP(part, "PoleESP", "⚡ РЫЧАГ 100", Color3.fromRGB(60, 255, 60))
-		desc.AncestryChanged:Connect(function()
-			if not desc.Parent then RemoveESP(part, "PoleESP") end
-		end)
+		return
 	end
 end
 
--- Refresh-функции (вызываются при включении Toggle)
-function refreshDoorsESP()
+--// Refresh при включении Toggle (для уже загруженных комнат)
+local currentRooms = Workspace:FindFirstChild("CurrentRooms")
+
+local function ScanRooms(filterFn)
 	if not currentRooms then return end
 	for _, room in ipairs(currentRooms:GetChildren()) do
 		for _, desc in ipairs(room:GetDescendants()) do
-			if desc.Name == "Door" or desc.Name == "dupeDoor" then
-				local isDupe = desc.Name == "dupeDoor" or desc:FindFirstChild("dupeDoor")
-				local part = GetPrimaryPart(desc)
-				if part then
-					if doorsESPEnabled then
-						local tag = isDupe and "ДУБЛЬ ДВЕРЬ" or "ПРАВИЛЬНАЯ ДВЕРЬ"
-						local col = isDupe and Color3.fromRGB(255,60,60) or Color3.fromRGB(60,255,60)
-						MakeESP(part, "DoorsESP", tag, col)
-					else
-						RemoveESP(part, "DoorsESP")
-					end
-				end
-			end
+			filterFn(desc)
 		end
 	end
+end
+
+function refreshDoorsESP()
+	ScanRooms(function(desc)
+		if desc.Name == "Door" then
+			local part = GetPrimaryPart(desc)
+			if doorsESPEnabled then
+				HandleDoor(desc)
+			else
+				RemoveESP(part, "DoorsESP")
+			end
+		end
+	end)
 end
 
 function refreshKeysESP()
-	if not currentRooms then return end
-	for _, room in ipairs(currentRooms:GetChildren()) do
-		for _, desc in ipairs(room:GetDescendants()) do
-			if desc.Name == "KeyObtain" then
-				local part = GetPrimaryPart(desc) or desc
-				if keyESPEnabled then MakeESP(part, "KeyESP", "🔑 КЛЮЧ", Color3.fromRGB(255,230,0))
-				else RemoveESP(part, "KeyESP") end
-			end
+	ScanRooms(function(desc)
+		if desc.Name == "KeyObtain" then
+			if keyESPEnabled then MakeItemESP(desc, "KeyESP", "🔑 КЛЮЧ", Color3.fromRGB(255, 220, 0))
+			else RemoveItemESP(desc, "KeyESP") end
 		end
-	end
+	end)
 end
 
 function refreshBooksESP()
-	if not currentRooms then return end
-	for _, room in ipairs(currentRooms:GetChildren()) do
-		for _, desc in ipairs(room:GetDescendants()) do
-			if desc.Name == "LiveHintBook" then
-				local part = GetPrimaryPart(desc) or desc
-				if booksESP then MakeESP(part, "BookESP", "📖 КНИГА", Color3.fromRGB(0,220,255))
-				else RemoveESP(part, "BookESP") end
-			end
+	ScanRooms(function(desc)
+		if desc.Name == "LiveHintBook" then
+			if booksESP then MakeItemESP(desc, "BookESP", "📖 КНИГА", Color3.fromRGB(0, 210, 255))
+			else RemoveItemESP(desc, "BookESP") end
 		end
-	end
+	end)
 end
 
 function refreshCrucifixESP()
-	if not currentRooms then return end
-	for _, room in ipairs(currentRooms:GetChildren()) do
-		for _, desc in ipairs(room:GetDescendants()) do
-			if desc.Name == "CrucifixWall" then
-				local part = GetPrimaryPart(desc) or desc
-				if crucifixESP then MakeESP(part, "CrucifixESP", "✝ КРЕСТ", Color3.fromRGB(255,200,50))
-				else RemoveESP(part, "CrucifixESP") end
-			end
+	ScanRooms(function(desc)
+		if desc.Name == "CrucifixWall" then
+			if crucifixESP then MakeItemESP(desc, "CrucifixESP", "✝ КРЕСТ", Color3.fromRGB(255, 200, 50))
+			else RemoveItemESP(desc, "CrucifixESP") end
 		end
-	end
+	end)
 end
 
 function refreshItemsESP()
-	if not currentRooms then return end
-	for _, room in ipairs(currentRooms:GetChildren()) do
-		for _, desc in ipairs(room:GetDescendants()) do
-			if desc.Name == "RolltopContainer" then
-				for _, child in ipairs(desc:GetChildren()) do
-					if child.Name ~= "Lid" then
-						local part = GetPrimaryPart(child) or child
-						if part then
-							if itemsESP then MakeESP(part, "ItemESP", "💊 " .. child.Name, Color3.fromRGB(180,255,100))
-							else RemoveESP(part, "ItemESP") end
-						end
-					end
+	ScanRooms(function(desc)
+		if desc.Name == "RolltopContainer" then
+			for _, child in ipairs(desc:GetChildren()) do
+				if child.Name ~= "Lid" then
+					if itemsESP then MakeItemESP(child, "ItemESP", "💊 " .. child.Name, Color3.fromRGB(160, 255, 80))
+					else RemoveItemESP(child, "ItemESP") end
 				end
 			end
 		end
-	end
+	end)
 end
 
--- Вешаем DescendantAdded на каждую новую комнату
+--// Подписка на новые комнаты и их потомков
+local function SubscribeRoom(room)
+	for _, desc in ipairs(room:GetDescendants()) do
+		HandleDescendant(desc)
+	end
+	room.DescendantAdded:Connect(HandleDescendant)
+end
+
 if currentRooms then
-	currentRooms.ChildAdded:Connect(function(room)
-		-- Сначала обрабатываем уже существующих потомков
-		for _, desc in ipairs(room:GetDescendants()) do
-			HandleDescendant(desc, room)
-		end
-		-- Потом ловим новых
-		room.DescendantAdded:Connect(function(desc)
-			HandleDescendant(desc, room)
-		end)
-	end)
-	-- Уже загруженные комнаты
 	for _, room in ipairs(currentRooms:GetChildren()) do
-		for _, desc in ipairs(room:GetDescendants()) do
-			HandleDescendant(desc, room)
+		SubscribeRoom(room)
+	end
+	currentRooms.ChildAdded:Connect(SubscribeRoom)
+else
+	-- Если CurrentRooms ещё не появился
+	Workspace.ChildAdded:Connect(function(child)
+		if child.Name == "CurrentRooms" then
+			currentRooms = child
+			for _, room in ipairs(child:GetChildren()) do
+				SubscribeRoom(room)
+			end
+			child.ChildAdded:Connect(SubscribeRoom)
 		end
-		room.DescendantAdded:Connect(function(desc)
-			HandleDescendant(desc, room)
-		end)
-	end
-end
-
---// ========================
---// SEEK АВТО-УКЛОН
---// ========================
-function stopSeekLoop()
-	seekActive = false
-	if seekMoveLoop then
-		seekMoveLoop:Disconnect()
-		seekMoveLoop = nil
-	end
-	-- Вернуть игрока на место
-	if originalCFrame and HumanoidRootPart then
-		HumanoidRootPart.CFrame = originalCFrame
-	end
-	originalCFrame = nil
-end
-
-local function startSeekLoop()
-	if seekActive then return end
-	seekActive = true
-	originalCFrame = HumanoidRootPart.CFrame
-	-- Опустить игрока под пол (невидим для Seek)
-	seekMoveLoop = RunService.Heartbeat:Connect(function()
-		if not seekActive then return end
-		if not HumanoidRootPart then return end
-		-- Держим игрока низко
-		local pos = HumanoidRootPart.Position
-		HumanoidRootPart.CFrame = CFrame.new(pos.X, floorY, pos.Z)
 	end)
 end
 
 --// ========================
---// RUSH/AMBUSH ТЕЛЕПОРТ
+--// ИГРОКИ ESP
 --// ========================
-local rushPresent = false
-local ambushPresent = false
+local playerHighlights = {}
 
---// ========================
---// PLAYER ESP (ники + подсветка)
---// ========================
-local playerESPConnections = {}
+local function SetPlayerESP(plr, enabled)
+	if plr == Player then return end
+	local char = plr.Character
+	if not char then return end
 
-local function UpdatePlayerESP()
-	for _, plr in ipairs(Players:GetPlayers()) do
-		if plr == Player then continue end
-		local char = plr.Character
-		if not char then continue end
-		local hrp = char:FindFirstChild("HumanoidRootPart")
-		if hrp then
-			if playerESPEnabled then
-				MakeESP(hrp, "PlayerESP", "👤 " .. plr.Name, Color3.fromRGB(100, 200, 255))
-			else
-				RemoveESP(hrp, "PlayerESP")
-			end
-		end
-		-- Highlight
-		local hl = char:FindFirstChildOfClass("SelectionBox") or (playerESPEnabled and Instance.new("SelectionBox") or nil)
-		if hl and playerESPEnabled then
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	if enabled then
+		if hrp then MakeESP(hrp, "PlayerESP", "👤 " .. plr.Name, Color3.fromRGB(100, 200, 255)) end
+		-- Обводка
+		if not char:FindFirstChild("PlayerHL") then
+			local hl = Instance.new("SelectionBox")
 			hl.Name = "PlayerHL"
 			hl.Adornee = char
 			hl.Color3 = Color3.fromRGB(100, 200, 255)
@@ -623,27 +584,40 @@ local function UpdatePlayerESP()
 			hl.SurfaceTransparency = 0.8
 			hl.SurfaceColor3 = Color3.fromRGB(100, 200, 255)
 			hl.Parent = char
-		elseif not playerESPEnabled then
-			local existing = char:FindFirstChild("PlayerHL")
-			if existing then existing:Destroy() end
 		end
+	else
+		if hrp then RemoveESP(hrp, "PlayerESP") end
+		local hl = char:FindFirstChild("PlayerHL")
+		if hl then hl:Destroy() end
 	end
 end
 
+Players.PlayerAdded:Connect(function(plr)
+	plr.CharacterAdded:Connect(function()
+		task.wait(1)
+		if playerESPEnabled then SetPlayerESP(plr, true) end
+	end)
+end)
+
 --// ========================
---// ГЛАВНЫЙ LOOP (только динамика)
+--// ГЛАВНЫЙ LOOP
 --// ========================
 local lastPosition = Vector3.new()
+local scanTick = 0
 
-RunService.Heartbeat:Connect(function()
+RunService.Heartbeat:Connect(function(dt)
 	-- Скорость
 	if speedEnabled and Humanoid then
 		Humanoid.WalkSpeed = customSpeed
 	end
 
+	-- FOV — обновляем каждый кадр чтобы работало
+	Camera.FieldOfView = customFOV
+
 	-- Анти-телепорт
 	if antiTpEnabled and HumanoidRootPart then
-		if (HumanoidRootPart.Position - lastPosition).Magnitude > 50 and not Workspace:GetAttribute("InElevator") then
+		if (HumanoidRootPart.Position - lastPosition).Magnitude > 50
+			and not Workspace:GetAttribute("InElevator") then
 			HumanoidRootPart.CFrame = CFrame.new(lastPosition)
 		else
 			lastPosition = HumanoidRootPart.Position
@@ -651,87 +625,92 @@ RunService.Heartbeat:Connect(function()
 	elseif HumanoidRootPart then
 		lastPosition = HumanoidRootPart.Position
 	end
-end)
 
--- Мировой скан (монстры) — реже, чем Heartbeat
-local scanTick = 0
-RunService.RenderStepped:Connect(function(dt)
+	-- Сканирование монстров (раз в 0.12 сек)
 	scanTick = scanTick + dt
-	if scanTick < 0.15 then return end -- сканируем раз в 0.15 сек, не каждый кадр
+	if scanTick < 0.12 then return end
 	scanTick = 0
 
 	local wsChildren = Workspace:GetChildren()
-
-	-- Rush & Ambush
 	local rushFound = false
 	local ambushFound = false
+
 	for _, obj in ipairs(wsChildren) do
 		local isRush = obj.Name == "RushMoving"
 		local isAmbush = obj.Name == "AmbushMoving"
+
 		if isRush or isAmbush then
 			-- Уведомление
 			if rushNotifications and not notifiedRush[obj] then
 				notifiedRush[obj] = true
-				SendNotification("⚠ ВНИМАНИЕ!", obj.Name .. " летит!")
+				SendNotification("⚠ ВНИМАНИЕ!", (isRush and "РАШ" or "АМБУШ") .. " летит!")
 			end
+
 			-- ESP
 			if rushAmbushESP then
 				local part = GetPrimaryPart(obj)
 				if part then
-					local lbl = isRush and "💨 РАШ" or "🌀 АМБУШ"
-					MakeESP(part, "RushAmbushESP", lbl, Color3.fromRGB(255, 60, 60))
+					MakeESP(part, "RushAmbushESP",
+						isRush and "💨 РАШ" or "🌀 АМБУШ",
+						Color3.fromRGB(255, 60, 60))
 				end
 			end
-			-- Телепорт Rush → крыша
+
 			if isRush then
 				rushFound = true
+				-- Телепорт вверх при появлении Раша
 				if rushRoofEnabled and HumanoidRootPart and not rushOnRoof then
 					rushOnRoof = true
-					rushSavedY = HumanoidRootPart.Position.Y
-					local pos = HumanoidRootPart.Position
-					HumanoidRootPart.CFrame = CFrame.new(pos.X, roofY, pos.Z)
+					rushSavedPos = HumanoidRootPart.Position
+					HumanoidRootPart.CFrame = CFrame.new(rushSavedPos.X, roofY, rushSavedPos.Z)
 				end
 			end
-			-- Телепорт Ambush → вниз
+
 			if isAmbush then
 				ambushFound = true
+				-- Телепорт вниз при появлении Амбуша
 				if ambushDownEnabled and HumanoidRootPart and not ambushDown then
 					ambushDown = true
-					local pos = HumanoidRootPart.Position
-					HumanoidRootPart.CFrame = CFrame.new(pos.X, floorY, pos.Z)
+					ambushSavedPos = HumanoidRootPart.Position
+					HumanoidRootPart.CFrame = CFrame.new(ambushSavedPos.X, floorY, ambushSavedPos.Z)
 				end
 			end
 		end
-	end
 
-	-- Возврат после Rush
-	if not rushFound and rushOnRoof then
-		rushOnRoof = false
-		if rushRoofEnabled and HumanoidRootPart and rushSavedY then
-			local pos = HumanoidRootPart.Position
-			HumanoidRootPart.CFrame = CFrame.new(pos.X, rushSavedY, pos.Z)
-		end
-	end
-	if not ambushFound and ambushDown then
-		ambushDown = false
-	end
-
-	-- Eyes
-	for _, obj in ipairs(wsChildren) do
+		-- Eyes
 		if obj.Name == "Eyes" then
 			if eyesESP then
 				local part = GetPrimaryPart(obj)
 				if part then MakeESP(part, "EyesESP", "👁 EYES", Color3.fromRGB(180, 0, 255)) end
 			end
-			if eyesAntiDamage and HumanoidRootPart then
-				Camera.CFrame = CFrame.new(Camera.CFrame.Position, Camera.CFrame.Position + Vector3.new(0, -5, 5))
+			if eyesAntiDamage then
+				Camera.CFrame = CFrame.new(Camera.CFrame.Position,
+					Camera.CFrame.Position + Vector3.new(0, -5, 5))
 			end
 		end
 	end
 
+	-- Возврат после Раша
+	if not rushFound and rushOnRoof then
+		rushOnRoof = false
+		if rushRoofEnabled and HumanoidRootPart and rushSavedPos then
+			HumanoidRootPart.CFrame = CFrame.new(rushSavedPos.X, rushSavedPos.Y, rushSavedPos.Z)
+			rushSavedPos = nil
+		end
+	end
+
+	-- Возврат после Амбуша
+	if not ambushFound and ambushDown then
+		ambushDown = false
+		if ambushDownEnabled and HumanoidRootPart and ambushSavedPos then
+			HumanoidRootPart.CFrame = CFrame.new(ambushSavedPos.X, ambushSavedPos.Y, ambushSavedPos.Z)
+			ambushSavedPos = nil
+		end
+	end
+
 	-- Screech
-	for _, name in ipairs({"Screech", "ScreechRetro", "ScreechRushMode"}) do
-		local s = Workspace:FindFirstChild(name, true)
+	for _, sName in ipairs({"Screech", "ScreechRetro", "ScreechRushMode"}) do
+		local s = Workspace:FindFirstChild(sName, true)
 		if s then
 			if screechNotif and not s:GetAttribute("Notified") then
 				s:SetAttribute("Notified", true)
@@ -743,16 +722,6 @@ RunService.RenderStepped:Connect(function(dt)
 					Camera.CFrame = CFrame.new(Camera.CFrame.Position, part.Position)
 				end
 			end
-		end
-	end
-
-	-- Seek авто-уклон
-	if seekAutoRun then
-		local seek = Workspace:FindFirstChild("SeekMovingNewClone")
-		if seek and not seekActive then
-			startSeekLoop()
-		elseif not seek and seekActive then
-			stopSeekLoop()
 		end
 	end
 
@@ -778,8 +747,10 @@ RunService.RenderStepped:Connect(function(dt)
 
 	-- Игроки ESP
 	if playerESPEnabled then
-		UpdatePlayerESP()
+		for _, plr in ipairs(Players:GetPlayers()) do
+			SetPlayerESP(plr, true)
+		end
 	end
 end)
 
-SendNotification("Doors v2.0 Загружен", "RightShift = меню. Лаги исправлены!")
+SendNotification("Doors v2.1 Загружен", "RightShift = меню")
