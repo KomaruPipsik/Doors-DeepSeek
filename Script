@@ -1,5 +1,5 @@
 --[[
-	Doors Advanced Client Utility (Luau)
+	Doors Advanced Client Utility (Luau) - Complete Version with UI Menu
 	Service-Oriented Architecture & Fully Optimized
 --]]
 
@@ -9,6 +9,7 @@ local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local StarterGui = game:GetService("StarterGui")
+local CoreGui = game:GetService("CoreGui")
 
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
@@ -23,9 +24,9 @@ _G.DoorsUtilityLoaded = true
 
 -- Конфигурация
 local Config = {
-	Speed = 16,
+	Speed = 20,
 	SpeedEnabled = false,
-	FullBrightEnabled = false,
+	FullBrightEnabled = true,
 	FPSBoosterEnabled = false,
 	ESP = {
 		DupeDoors = true,
@@ -37,12 +38,11 @@ local Config = {
 	},
 	Utilities = {
 		EyesAutoAvoid = true,
-		ScreechAutoTurn = true,
+		ScreechAutoTurn = false,
 	}
 }
 
--- Хранилище связей объектов с ESP
-local ESPObjects = {}
+-- Хранилище подключений
 local Connections = {}
 
 local function CreateNotification(title, text, duration)
@@ -55,14 +55,154 @@ local function CreateNotification(title, text, duration)
 	end)
 end
 
-local function SafeGet(parent, path)
-	local current = parent
-	for _, segment in ipairs(path) do
-		if not current then return nil end
-		current = current:FindFirstChild(segment)
-	end
-	return current
+-- Создание графического меню (GUI)
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "DoorsUtilityGUI"
+ScreenGui.ResetOnSpawn = false
+-- Защита от обнаружения / безопасное размещение
+local successUI = pcall(function()
+	ScreenGui.Parent = CoreGui
+end)
+if not successUI then
+	ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 end
+
+-- Главная панель
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 420, 0, 360)
+MainFrame.Position = UDim2.new(0.5, -210, 0.5, -180)
+MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.Parent = ScreenGui
+
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(0, 8)
+UICorner.Parent = MainFrame
+
+-- Шапка панели
+local Header = Instance.new("Frame")
+Header.Name = "Header"
+Header.Size = UDim2.new(1, 0, 0, 40)
+Header.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+Header.BorderSizePixel = 0
+Header.Parent = MainFrame
+
+local HeaderCorner = Instance.new("UICorner")
+HeaderCorner.CornerRadius = UDim.new(0, 8)
+HeaderCorner.Parent = Header
+
+local TitleLabel = Instance.new("TextLabel")
+TitleLabel.Size = UDim2.new(1, -20, 1, 0)
+TitleLabel.Position = UDim2.new(0, 10, 0, 0)
+TitleLabel.BackgroundTransparency = 1
+TitleLabel.Font = Enum.Font.GothamBold
+TitleLabel.Text = "Doors Utility Hub (Press RightShift to Hide)"
+TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+TitleLabel.TextSize = 15
+TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+TitleLabel.Parent = Header
+
+-- Контейнер для опций (ScrollingFrame)
+local ScrollingFrame = Instance.new("ScrollingFrame")
+ScrollingFrame.Size = UDim2.new(1, -20, 1, -60)
+ScrollingFrame.Position = UDim2.new(0, 10, 0, 50)
+ScrollingFrame.BackgroundTransparency = 1
+ScrollingFrame.BorderSizePixel = 0
+ScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 450)
+ScrollingFrame.ScrollBarThickness = 6
+ScrollingFrame.Parent = MainFrame
+
+local UIListLayout = Instance.new("UIListLayout")
+UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+UIListLayout.Padding = UDim.new(0, 8)
+UIListLayout.Parent = ScrollingFrame
+
+-- Функция создания переключателя (Toggle Button)
+local function CreateToggle(name, defaultState, callback)
+	local ToggleFrame = Instance.new("Frame")
+	ToggleFrame.Size = UDim2.new(1, 0, 0, 36)
+	ToggleFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+	ToggleFrame.BorderSizePixel = 0
+	ToggleFrame.Parent = ScrollingFrame
+
+	local Corner = Instance.new("UICorner")
+	Corner.CornerRadius = UDim.new(0, 6)
+	Corner.Parent = ToggleFrame
+
+	local Label = Instance.new("TextLabel")
+	Label.Size = UDim2.new(1, -60, 1, 0)
+	Label.Position = UDim2.new(0, 12, 0, 0)
+	Label.BackgroundTransparency = 1
+	Label.Font = Enum.Font.GothamMedium
+	Label.Text = name
+	Label.TextColor3 = Color3.fromRGB(220, 220, 220)
+	Label.TextSize = 14
+	Label.TextXAlignment = Enum.TextXAlignment.Left
+	Label.Parent = ToggleFrame
+
+	local Button = Instance.new("TextButton")
+	Button.Size = UDim2.new(0, 44, 0, 22)
+	Button.Position = UDim2.new(1, -52, 0.5, -11)
+	Button.BackgroundColor3 = defaultState and Color3.fromRGB(0, 170, 255) or Color3.fromRGB(60, 60, 75)
+	Button.AutoButtonColor = false
+	Button.Text = ""
+	Button.Parent = ToggleFrame
+
+	local BtnCorner = Instance.new("UICorner")
+	BtnCorner.CornerRadius = UDim.new(1, 0)
+	BtnCorner.Parent = Button
+
+	local Circle = Instance.new("Frame")
+	Circle.Size = UDim2.new(0, 18, 0, 18)
+	Circle.Position = defaultState and UDim2.new(1, -20, 0.5, -9) or UDim2.new(0, 2, 0.5, -9)
+	Circle.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+	Circle.BorderSizePixel = 0
+	Circle.Parent = Button
+
+	local CircleCorner = Instance.new("UICorner")
+	CircleCorner.CornerRadius = UDim.new(1, 0)
+	CircleCorner.Parent = Circle
+
+	local state = defaultState
+	Button.MouseButton1Click:Connect(function()
+		state = not state
+		local targetPos = state and UDim2.new(1, -20, 0.5, -9) or UDim2.new(0, 2, 0.5, -9)
+		local targetColor = state and Color3.fromRGB(0, 170, 255) or Color3.fromRGB(60, 60, 75)
+
+		Circle:TweenPosition(targetPos, Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.15, true)
+		Button.BackgroundColor3 = targetColor
+
+		callback(state)
+	end)
+end
+
+-- Создание элементов управления в меню
+CreateToggle("Подсветка фальшивых дверей (dupeDoor)", Config.ESP.DupeDoors, function(val) Config.ESP.DupeDoors = val end)
+CreateToggle("Подсветка ключей (Keys)", Config.ESP.Keys, function(val) Config.ESP.Keys = val end)
+CreateToggle("Подсветка капканов (Snares 90-99)", Config.ESP.Snares, function(val) Config.ESP.Snares = val end)
+CreateToggle("Подсветка рубильников (Room 100)", Config.ESP.BreakerPoles, function(val) Config.ESP.BreakerPoles = val end)
+CreateToggle("Подсветка фигуры и книг (Room 50)", Config.ESP.Figure, function(val) 
+	Config.ESP.Figure = val 
+	Config.ESP.Books = val 
+end)
+CreateToggle("Авто-избежание взгляда (Eyes)", Config.Utilities.EyesAutoAvoid, function(val) Config.Utilities.EyesAutoAvoid = val end)
+CreateToggle("Авто-разворот на Screech", Config.Utilities.ScreechAutoTurn, function(val) Config.Utilities.ScreechAutoTurn = val end)
+CreateToggle("Ускорение бега (Speed Hack)", Config.SpeedEnabled, function(val) Config.SpeedEnabled = val end)
+CreateToggle("FullBright (Улучшенный свет)", Config.FullBrightEnabled, function(val) 
+	Config.FullBrightEnabled = val 
+	ToggleFullBright(val)
+end)
+
+-- Переключатель видимости меню по клавише RightShift
+local UserInputService = game:GetService("UserInputService")
+table.insert(Connections, UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if input.KeyCode == Enum.KeyCode.RightShift then
+		MainFrame.Visible = not MainFrame.Visible
+	end
+end))
 
 -- Система ESP (Подсветка)
 local function AddHighlight(parent, color)
@@ -102,9 +242,197 @@ function RoomsManager.Scan()
 				if dupeDoor then
 					AddHighlight(dupeDoor, Color3.fromRGB(255, 0, 0))
 				end
+			else
+				local dupeDoor = room:FindFirstChild("dupeDoor", true) or room:FindFirstChild("DupeDoor", true)
+				RemoveHighlight(dupeDoor)
 			end
 
-			-- Поиск ключей (с учетом возможных опечаток в названиях)
+			-- Поиск ключей
+			if Config.ESP.Keys then
+				local assets = room:FindFirstChild("Assets")
+				if assets then
+					for _, asset in ipairs(assets:GetChildren()) do
+						if asset.Name == "Dresser" or asset.Name == "DrawerContainer" or asset.Name == "DrawerContalner" then
+							local keyObtain = asset:FindFirstChild("KeyObtain") or asset:FindFirstChild("KeyObtaln")
+							local hitbox = keyObtain and (keyObtain:FindFirstChild("Hitbox") or keyObtain:FindFirstChild("KeyNitbox") or keyObtain:FindFirstChild("KeyHitbox"))
+							if hitbox then
+								AddHighlight(hitbox, Color3.fromRGB(255, 255, 0))
+							end
+						end
+					end
+				end
+			end
+
+			-- Капканы (Комнаты 90-99)
+			if Config.ESP.Snares and roomNum >= 90 and roomNum <= 99 then
+				local assets = room:FindFirstChild("Assets")
+				if assets then
+					for _, asset in ipairs(assets:GetChildren()) do
+						if asset.Name == "Snare" then
+							local snareBase = asset:FindFirstChild("Snare") and asset.Snare:FindFirstChild("SnareBase")
+							if snareBase then
+								AddHighlight(snareBase, Color3.fromRGB(255, 128, 0))
+							end
+						end
+					end
+				end
+			end
+
+			-- Рубильники (Комната 100)
+			if Config.ESP.BreakerPoles and roomNum == 100 then
+				local assets = room:FindFirstChild("Assets")
+				if assets then
+					for _, asset in ipairs(assets:GetChildren()) do
+						if asset.Name:find("LiveBreakerPole") then
+							AddHighlight(asset, Color3.fromRGB(0, 255, 255))
+						end
+					end
+				end
+			end
+
+			-- Комната 50: Книги и Фигура
+			if roomNum == 50 then
+				local figureSetup = room:FindFirstChild("FigureSetup") or room:FindFirstChild("FlgureSetup")
+				if figureSetup and Config.ESP.Figure then
+					local figureRig = figureSetup:FindFirstChild("FigureRig")
+					if figureRig then
+						AddHighlight(figureRig, Color3.fromRGB(150, 0, 255))
+					end
+				end
+
+				local assets = room:FindFirstChild("Assets")
+				if assets and Config.ESP.Books then
+					for _, asset in ipairs(assets:GetChildren()) do
+						if asset.Name:find("Bookshelves") then
+							local shelf = asset:FindFirstChild("Modular_Bookshelf") or asset
+							for _, book in ipairs(shelf:GetDescendants()) do
+								if book.Name == "LiveHintBook" then
+									AddHighlight(book, Color3.fromRGB(0, 255, 0))
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+-- Мониторинг Сущностей (Entities)
+local function MonitorEntities()
+	local lastRushState = false
+	local lastAmbushState = false
+
+	table.insert(Connections, RunService.RenderStepped:Connect(function()
+		-- Rush & Ambush
+		local rush = Workspace:FindFirstChild("RushMoving")
+		local ambush = Workspace:FindFirstChild("AmbushMoving")
+
+		if rush and not lastRushState then
+			CreateNotification("Внимание!", "Приближается Rush!", 4)
+			lastRushState = true
+		elseif not rush and lastRushState then
+			lastRushState = false
+		end
+
+		if ambush and not lastAmbushState then
+			CreateNotification("Внимание!", "Приближается Ambush!", 4)
+			lastAmbushState = true
+		elseif not ambush and lastAmbushState then
+			lastAmbushState = false
+		end
+
+		-- Eyes
+		local eyes = Workspace:FindFirstChild("Eyes")
+		if eyes and Config.Utilities.EyesAutoAvoid then
+			local head = eyes:FindFirstChild("Head") or eyes:FindFirstChild("Eye")
+			if head then
+				local lookVector = Camera.CFrame.LookVector
+				local targetVector = (head.Position - Camera.CFrame.Position).Unit
+				local dot = lookVector:Dot(targetVector)
+				if dot > 0.5 then
+					Camera.CFrame = CFrame.lookAt(Camera.CFrame.Position, Camera.CFrame.Position - targetVector)
+				end
+			end
+		end
+
+		-- Screech
+		local screechNames = {"Screech", "ScreechRetro", "ScreechRushMode"}
+		for _, name in ipairs(screechNames) do
+			local screech = Workspace:FindFirstChild(name) or (ReplicatedStorage:FindFirstChild("Entities") and ReplicatedStorage.Entities:FindFirstChild(name))
+			if screech then
+				if Config.Utilities.ScreechAutoTurn then
+					if screech:IsA("Model") and screech.PrimaryPart then
+						Camera.CFrame = CFrame.lookAt(Camera.CFrame.Position, screech.PrimaryPart.Position)
+					end
+				end
+			end
+		end
+	end))
+end
+
+-- Управление скоростью персонажа
+local function InitMovement()
+	table.insert(Connections, RunService.Heartbeat:Connect(function()
+		if not Config.SpeedEnabled then return end
+		local character = LocalPlayer.Character
+		if not character then return end
+		local humanoid = character:FindFirstChildOfClass("Humanoid")
+		if humanoid and humanoid.WalkSpeed ~= Config.Speed then
+			humanoid.WalkSpeed = Config.Speed
+		end
+	end))
+end
+
+-- FullBright
+function ToggleFullBright(enabled)
+	if enabled then
+		Lighting.Brightness = 2
+		Lighting.ClockTime = 14
+		Lighting.GlobalShadows = false
+		Lighting.OutdoorAmbient = Color3.fromRGB(128, 128, 128)
+	else
+		Lighting.Brightness = 1
+		Lighting.ClockTime = 0
+		Lighting.GlobalShadows = true
+		Lighting.OutdoorAmbient = Color3.fromRGB(0, 0, 0)
+	end
+end
+
+-- Инициализация освещения
+ToggleFullBright(Config.FullBrightEnabled)
+
+-- Основной цикл сканирования комнат
+task.spawn(function()
+	while true do
+		pcall(function()
+			RoomsManager.Scan()
+		end)
+		task.wait(1)
+	end
+end)
+
+-- Запуск систем слежения
+MonitorEntities()
+InitMovement()
+
+-- Функция очистки при повторном запуске
+_G.DoorsUtilityCleanup = function()
+	for _, conn in ipairs(Connections) do
+		conn:Disconnect()
+	end
+	for _, obj in ipairs(Workspace:GetDescendants()) do
+		RemoveHighlight(obj)
+	end
+	if ScreenGui then
+		ScreenGui:Destroy()
+	end
+	ToggleFullBright(false)
+	_G.DoorsUtilityLoaded = nil
+	print("DoorsUtility успешно выгружен.")
+end
+
+CreateNotification("Doors Utility", "Меню успешно загружено! Нажми RightShift для скрытия/показа.", 4)
 			if Config.ESP.Keys then
 				local assets = room:FindFirstChild("Assets")
 				if assets then
