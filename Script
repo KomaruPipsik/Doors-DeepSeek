@@ -1,110 +1,310 @@
 --[[
-	Doors Hobbit/Escape Client Script with GUI
-	Version: 4.0 - FIXED GUI
+	Doors Advanced Client Utility (Luau)
+	Service-Oriented Architecture & Fully Optimized
 --]]
 
---// Services
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
 local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local StarterGui = game:GetService("StarterGui")
-local Workspace = game:GetService("Workspace")
-local UserInputService = game:GetService("UserInputService")
 
---// Local Player
 local LocalPlayer = Players.LocalPlayer
-local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 local Camera = Workspace.CurrentCamera
-local Character, Humanoid, RootPart
 
---// Configuration
-local Config = {
-	ESP = {
-		DupeDoor = { Enabled = true, Color = Color3.fromRGB(255, 100, 100) },
-		Key = { Enabled = true, Color = Color3.fromRGB(255, 215, 0) },
-		Snare = { Enabled = true, Color = Color3.fromRGB(255, 0, 0) },
-		Breaker = { Enabled = true, Color = Color3.fromRGB(0, 255, 255) },
-		Book = { Enabled = true, Color = Color3.fromRGB(0, 255, 0) },
-	},
-	Entities = {
-		RushAlert = { Enabled = true },
-		AmbushAlert = { Enabled = true },
-		EyesProtection = { Enabled = true, AutoLookAway = true, LookAwayAngle = 85 },
-		ScreechAlert = { Enabled = true, AutoLook = true },
-	},
-	FigureAvoidance = { Enabled = true, AvoidRadius = 25 },
-	CustomSpeed = { Enabled = false, Speed = 24 },
-	FullBright = { Enabled = true },
-	FPSBooster = { Enabled = false },
-}
-
---// Core
-local Core = {
-	ESPObjects = {},
-	Connections = {},
-	ScreechAlerted = {},
-}
-
---// Utility
-local function safeFind(instance, ...)
-	local s, r = pcall(function() return instance:FindFirstChild(...) end)
-	return s and r or nil
+-- Защита от повторного запуска
+if _G.DoorsUtilityLoaded then
+	if _G.DoorsUtilityCleanup then
+		_G.DoorsUtilityCleanup()
+	end
 end
+_G.DoorsUtilityLoaded = true
 
-local function notify(msg, dur)
+-- Конфигурация
+local Config = {
+	Speed = 16,
+	SpeedEnabled = false,
+	FullBrightEnabled = false,
+	FPSBoosterEnabled = false,
+	ESP = {
+		DupeDoors = true,
+		Keys = true,
+		Snares = true,
+		BreakerPoles = true,
+		Figure = true,
+		Books = true,
+	},
+	Utilities = {
+		EyesAutoAvoid = true,
+		ScreechAutoTurn = true,
+	}
+}
+
+-- Хранилище связей объектов с ESP
+local ESPObjects = {}
+local Connections = {}
+
+local function CreateNotification(title, text, duration)
 	pcall(function()
 		StarterGui:SetCore("SendNotification", {
-			Title = "Hobbit System",
-			Text = msg,
-			Duration = dur or 3,
+			Title = title,
+			Text = text,
+			Duration = duration or 3
 		})
 	end)
 end
 
---// ESP
-local function createHighlight(part, color)
-	if not part or not part:IsA("BasePart") then return nil end
-	local s, h = pcall(function()
-		local hl = Instance.new("Highlight")
-		hl.FillColor = color
-		hl.FillTransparency = 0.5
-		hl.OutlineColor = color
-		hl.OutlineTransparency = 0
-		hl.Adornee = part
-		hl.Parent = part
-		return hl
-	end)
-	return s and h or nil
-end
-
-local function clearESP()
-	for _, h in ipairs(Core.ESPObjects) do
-		pcall(function() h:Destroy() end)
+local function SafeGet(parent, path)
+	local current = parent
+	for _, segment in ipairs(path) do
+		if not current then return nil end
+		current = current:FindFirstChild(segment)
 	end
-	table.clear(Core.ESPObjects)
+	return current
 end
 
---// Character
-local function getChar()
-	Character = LocalPlayer.Character
-	if Character then
-		Humanoid = safeFind(Character, "Humanoid")
-		RootPart = safeFind(Character, "HumanoidRootPart")
+-- Система ESP (Подсветка)
+local function AddHighlight(parent, color)
+	if not parent then return nil end
+	local existing = parent:FindFirstChild("DoorsUtilityHighlight")
+	if existing then return existing end
+
+	local highlight = Instance.new("Highlight")
+	highlight.Name = "DoorsUtilityHighlight"
+	highlight.Adornee = parent
+	highlight.FillColor = color
+	highlight.OutlineColor = Color3.new(1, 1, 1)
+	highlight.FillTransparency = 0.5
+	highlight.OutlineTransparency = 0
+	highlight.Parent = parent
+	return highlight
+end
+
+local function RemoveHighlight(parent)
+	if not parent then return end
+	local existing = parent:FindFirstChild("DoorsUtilityHighlight")
+	if existing then existing:Destroy() end
+end
+
+-- Модуль Комнат и Дверей
+local RoomsManager = {}
+function RoomsManager.Scan()
+	local currentRooms = Workspace:FindFirstChild("CurrentRooms")
+	if not currentRooms then return end
+
+	for _, room in ipairs(currentRooms:GetChildren()) do
+		local roomNum = tonumber(room.Name)
+		if roomNum and roomNum >= 0 and roomNum <= 100 then
+			-- Детекция dupeDoor
+			if Config.ESP.DupeDoors then
+				local dupeDoor = room:FindFirstChild("dupeDoor", true) or room:FindFirstChild("DupeDoor", true)
+				if dupeDoor then
+					AddHighlight(dupeDoor, Color3.fromRGB(255, 0, 0))
+				end
+			end
+
+			-- Поиск ключей (с учетом возможных опечаток в названиях)
+			if Config.ESP.Keys then
+				local assets = room:FindFirstChild("Assets")
+				if assets then
+					for _, asset in ipairs(assets:GetChildren()) do
+						if asset.Name == "Dresser" or asset.Name == "DrawerContainer" or asset.Name == "DrawerContalner" then
+							local keyObtain = asset:FindFirstChild("KeyObtain") or asset:FindFirstChild("KeyObtaln")
+							local hitbox = keyObtain and (keyObtain:FindFirstChild("Hitbox") or keyObtain:FindFirstChild("KeyNitbox") or keyObtain:FindFirstChild("KeyHitbox"))
+							if hitbox then
+								AddHighlight(hitbox, Color3.fromRGB(255, 255, 0))
+							end
+						end
+					end
+				end
+			end
+
+			-- Капканы (Комнаты 90-99)
+			if Config.ESP.Snares and roomNum >= 90 and roomNum <= 99 then
+				local assets = room:FindFirstChild("Assets")
+				if assets then
+					for _, asset in ipairs(assets:GetChildren()) do
+						if asset.Name == "Snare" then
+							local snareBase = asset:FindFirstChild("Snare") and asset.Snare:FindFirstChild("SnareBase")
+							if snareBase then
+								AddHighlight(snareBase, Color3.fromRGB(255, 128, 0))
+							end
+						end
+					end
+				end
+			end
+
+			-- Рубильники (Комната 100)
+			if Config.ESP.BreakerPoles and roomNum == 100 then
+				local assets = room:FindFirstChild("Assets")
+				if assets then
+					for _, asset in ipairs(assets:GetChildren()) do
+						if asset.Name:find("LiveBreakerPole") then
+							AddHighlight(asset, Color3.fromRGB(0, 255, 255))
+						end
+					end
+				end
+			end
+
+			-- Комната 50: Книги и Фигура
+			if roomNum == 50 then
+				local figureSetup = room:FindFirstChild("FigureSetup") or room:FindFirstChild("FlgureSetup")
+				if figureSetup and Config.ESP.Figure then
+					local figureRig = figureSetup:FindFirstChild("FigureRig")
+					if figureRig then
+						AddHighlight(figureRig, Color3.fromRGB(150, 0, 255))
+					end
+				end
+
+				local assets = room:FindFirstChild("Assets")
+				if assets and Config.ESP.Books then
+					for _, asset in ipairs(assets:GetChildren()) do
+						if asset.Name:find("Bookshelves") then
+							local shelf = asset:FindFirstChild("Modular_Bookshelf") or asset
+							for _, book in ipairs(shelf:GetDescendants()) do
+								if book.Name == "LiveHintBook" then
+									AddHighlight(book, Color3.fromRGB(0, 255, 0))
+								end
+							end
+						end
+					end
+				end
+			end
+		end
 	end
 end
 
-LocalPlayer.CharacterAdded:Connect(function()
-	task.wait(0.1)
-	getChar()
-	if Config.CustomSpeed.Enabled and Humanoid then
-		Humanoid.WalkSpeed = Config.CustomSpeed.Speed
+-- Мониторинг Сущностей (Entities)
+local function MonitorEntities()
+	local lastRushState = false
+	local lastAmbushState = false
+
+	table.insert(Connections, RunService.RenderStepped:Connect(function()
+		-- Rush & Ambush
+		local rush = Workspace:FindFirstChild("RushMoving")
+		local ambush = Workspace:FindFirstChild("AmbushMoving")
+
+		if rush and not lastRushState then
+			CreateNotification("Внимание!", "Приближается Rush!", 4)
+			lastRushState = true
+		elseif not rush and lastRushState then
+			lastRushState = false
+		end
+
+		if ambush and not lastAmbushState then
+			CreateNotification("Внимание!", "Приближается Ambush!", 4)
+			lastAmbushState = true
+		elseif not ambush and lastAmbushState then
+			lastAmbushState = false
+		end
+
+		-- Eyes
+		local eyes = Workspace:FindFirstChild("Eyes")
+		if eyes and Config.Utilities.EyesAutoAvoid then
+			local character = LocalPlayer.Character
+			if character and character:FindFirstChild("HumanoidRootPart") then
+				local head = eyes:FindFirstChild("Head") or eyes:FindFirstChild("Eye")
+				if head then
+					local lookVector = Camera.CFrame.LookVector
+					local targetVector = (head.Position - Camera.CFrame.Position).Unit
+					local dot = lookVector:Dot(targetVector)
+					-- Если игрок смотрит прямо на Eyes (Dot > 0.5)
+					if dot > 0.5 then
+						Camera.CFrame = CFrame.lookAt(Camera.CFrame.Position, Camera.CFrame.Position - targetVector)
+					end
+				end
+			end
+		end
+
+		-- Screech
+		local screechNames = {"Screech", "ScreechRetro", "ScreechRushMode"}
+		for _, name in ipairs(screechNames) do
+			local screech = Workspace:FindFirstChild(name) or (ReplicatedStorage:FindFirstChild("Entities") and ReplicatedStorage.Entities:FindFirstChild(name))
+			if screech then
+				-- Логика обработки Screech
+				if Config.Utilities.ScreechAutoTurn then
+					local character = LocalPlayer.Character
+					if character and character:FindFirstChild("HumanoidRootPart") and screech:IsA("Model") and screech.PrimaryPart then
+						Camera.CFrame = CFrame.lookAt(Camera.CFrame.Position, screech.PrimaryPart.Position)
+					end
+				end
+			end
+		end
+	end))
+end
+
+-- Управление скоростью персонажа (Anti-Rubberband)
+local function InitMovement()
+	table.insert(Connections, RunService.Heartbeat:Connect(function()
+		if not Config.SpeedEnabled then return end
+		local character = LocalPlayer.Character
+		if not character then return end
+		local humanoid = character:FindFirstChildOfClass("Humanoid")
+		local rootPart = character:FindFirstChild("HumanoidRootPart")
+		if humanoid and rootPart then
+			if humanoid.WalkSpeed ~= Config.Speed then
+				humanoid.WalkSpeed = Config.Speed
+			end
+		end
+	end))
+end
+
+-- FullBright
+local function ToggleFullBright(enabled)
+	if enabled then
+		Lighting.Brightness = 2
+		Lighting.ClockTime = 14
+		Lighting.GlobalShadows = false
+		Lighting.OutdoorAmbient = Color3.fromRGB(128, 128, 128)
+	else
+		Lighting.Brightness = 1
+		Lighting.ClockTime = 0
+		Lighting.GlobalShadows = true
+		Lighting.OutdoorAmbient = Color3.fromRGB(0, 0, 0)
+	end
+end
+
+-- FPS Booster (Оптимизация рендеринга)
+local function ApplyFPSBooster()
+	for _, obj in ipairs(Workspace:GetDescendants()) do
+		if obj:IsA("BasePart") then
+			obj.Material = Enum.Material.SmoothPlastic
+			obj.Reflectance = 0
+		elseif obj:IsA("Decal") or obj:IsA("Texture") then
+			obj.Transparency = 1
+		end
+	end
+end
+
+-- Основной цикл сканирования комнат
+task.spawn(function()
+	while true do
+		pcall(function()
+			RoomsManager.Scan()
+		end)
+		task.wait(1)
 	end
 end)
-getChar()
 
---// Features
-local function toggleFullBright(on)
+-- Инициализация систем
+MonitorEntities()
+InitMovement()
+
+-- Функция очистки при перезапуске скрипта
+_G.DoorsUtilityCleanup = function()
+	for _, conn in ipairs(Connections) do
+		conn:Disconnect()
+	end
+	for _, obj in ipairs(Workspace:GetDescendants()) do
+		RemoveHighlight(obj)
+	end
+	ToggleFullBright(false)
+	_G.DoorsUtilityLoaded = nil
+	print("DoorsUtility успешно выгружен.")
+end
+
+CreateNotification("Doors Utility", "Скрипт успешно инициализирован!", 3)
 	if on then
 		Lighting.Brightness = 0.3
 		Lighting.Ambient = Color3.fromRGB(180, 180, 180)
