@@ -600,6 +600,38 @@ Players.PlayerAdded:Connect(function(plr)
 end)
 
 --// ========================
+--// SCREECH — отслеживаем через событие
+--// ========================
+local screechNames = {Screech = true, ScreechRetro = true, ScreechRushMode = true}
+local activeSreech = nil
+
+local function OnDescendantAdded(desc)
+	if screechNames[desc.Name] then
+		activeSreech = desc
+		if screechNotif then
+			SendNotification("😱 SCREECH!", "Скрич появился — не смотри на него!")
+		end
+		-- Убираем когда исчезнет
+		desc.AncestryChanged:Connect(function()
+			if not desc.Parent then
+				if activeSreech == desc then
+					activeSreech = nil
+				end
+			end
+		end)
+	end
+end
+
+Workspace.DescendantAdded:Connect(OnDescendantAdded)
+
+-- Проверяем уже существующих (на случай если скрипт загружен во время игры)
+for _, desc in ipairs(Workspace:GetDescendants()) do
+	if screechNames[desc.Name] then
+		activeSreech = desc
+	end
+end
+
+--// ========================
 --// ГЛАВНЫЙ LOOP
 --// ========================
 local lastPosition = Vector3.new()
@@ -662,7 +694,7 @@ RunService.Heartbeat:Connect(function(dt)
 				if rushRoofEnabled and HumanoidRootPart and not rushOnRoof then
 					rushOnRoof = true
 					rushSavedPos = HumanoidRootPart.Position
-					HumanoidRootPart.CFrame = CFrame.new(rushSavedPos.X, roofY, rushSavedPos.Z)
+					HumanoidRootPart.CFrame = CFrame.new(rushSavedPos.X, rushSavedPos.Y + 25, rushSavedPos.Z)
 				end
 			end
 
@@ -672,7 +704,7 @@ RunService.Heartbeat:Connect(function(dt)
 				if ambushDownEnabled and HumanoidRootPart and not ambushDown then
 					ambushDown = true
 					ambushSavedPos = HumanoidRootPart.Position
-					HumanoidRootPart.CFrame = CFrame.new(ambushSavedPos.X, floorY, ambushSavedPos.Z)
+					HumanoidRootPart.CFrame = CFrame.new(ambushSavedPos.X, ambushSavedPos.Y - 25, ambushSavedPos.Z)
 				end
 			end
 		end
@@ -684,8 +716,14 @@ RunService.Heartbeat:Connect(function(dt)
 				if part then MakeESP(part, "EyesESP", "👁 EYES", Color3.fromRGB(180, 0, 255)) end
 			end
 			if eyesAntiDamage then
-				Camera.CFrame = CFrame.new(Camera.CFrame.Position,
-					Camera.CFrame.Position + Vector3.new(0, -5, 5))
+				-- Отворачиваем камеру ОТ Eyes — смотрим в противоположную сторону
+				local part = GetPrimaryPart(obj)
+				if part and HumanoidRootPart then
+					local awayDir = (HumanoidRootPart.Position - part.Position).Unit
+					-- Смотрим в сторону противоположную от Eyes
+					Camera.CFrame = CFrame.new(Camera.CFrame.Position,
+						Camera.CFrame.Position + awayDir)
+				end
 			end
 		end
 	end
@@ -708,20 +746,11 @@ RunService.Heartbeat:Connect(function(dt)
 		end
 	end
 
-	-- Screech
-	for _, sName in ipairs({"Screech", "ScreechRetro", "ScreechRushMode"}) do
-		local s = Workspace:FindFirstChild(sName, true)
-		if s then
-			if screechNotif and not s:GetAttribute("Notified") then
-				s:SetAttribute("Notified", true)
-				SendNotification("😱 SCREECH!", "Скрич появился!")
-			end
-			if screechAutoTurn then
-				local part = s:FindFirstChild("HumanoidRootPart") or s:FindFirstChildWhichIsA("BasePart")
-				if part then
-					Camera.CFrame = CFrame.new(Camera.CFrame.Position, part.Position)
-				end
-			end
+	-- Screech (авто-поворот камеры к скричу — если включён)
+	if screechAutoTurn and activeSreech then
+		local part = activeSreech:FindFirstChild("HumanoidRootPart") or activeSreech:FindFirstChildWhichIsA("BasePart")
+		if part then
+			Camera.CFrame = CFrame.new(Camera.CFrame.Position, part.Position)
 		end
 	end
 
