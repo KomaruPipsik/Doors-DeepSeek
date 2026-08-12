@@ -1,12 +1,12 @@
---// DOORS SCRIPT (FULL VERSION & FIXED ESP + RUSH/AMBUSH)
+--// DOORS SCRIPT v2.0 — FIXED LAGS + NEW FEATURES
+--// Оптимизировано: ESP создаётся один раз через событие, не каждый кадр
+
 --// Services
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local CoreGui = game:GetService("CoreGui")
 local UserInputService = game:GetService("UserInputService")
-local TweenService = game:GetService("TweenService")
 local StarterGui = game:GetService("StarterGui")
 
 local Player = Players.LocalPlayer
@@ -21,62 +21,49 @@ Player.CharacterAdded:Connect(function(char)
 	HumanoidRootPart = char:WaitForChild("HumanoidRootPart")
 end)
 
---// GUI Creation
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "DoorsGui"
-ScreenGui.ResetOnSpawn = false
-if syn and syn.protect_gui then
-	syn.protect_gui(ScreenGui)
-	ScreenGui.Parent = CoreGui
-else
-	pcall(function()
-		ScreenGui.Parent = CoreGui
-	end)
-	if ScreenGui.Parent ~= CoreGui then
-		ScreenGui.Parent = Player:WaitForChild("PlayerGui")
-	end
-end
+--// States
+local doorsESPEnabled = false
+local rushAmbushESP = false
+local rushNotifications = false
+local fullBrightEnabled = false
+local keyESPEnabled = false
+local leverESPEnabled = false
+local customSpeed = 16
+local speedEnabled = false
+local antiTpEnabled = false
+local eyesESP = false
+local eyesAntiDamage = false
+local screechAutoTurn = false
+local screechNotif = false
+local figureESP = false
+local figureAvoid = false
+local avoidRadius = 15
+local booksESP = false
+local snareESP = false
+local polesESP = false
+local crucifixESP = false
+local itemsESP = false
+local seekAutoRun = false
+local rushRoofEnabled = false
+local ambushDownEnabled = false
+local playerESPEnabled = false
+local customFOV = 70
 
--- Main Frame
-local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 520, 0, 420)
-MainFrame.Position = UDim2.new(0.5, -260, 0.5, -210)
-MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-MainFrame.BorderSizePixel = 0
-MainFrame.Visible = true
-MainFrame.Parent = ScreenGui
+--// Seek state
+local seekActive = false
+local seekMoveLoop = nil
+local originalCFrame = nil
 
-local UICorner = Instance.new("UICorner")
-UICorner.CornerRadius = UDim.new(0, 8)
-UICorner.Parent = MainFrame
+--// Rush/Ambush roof state
+local rushOnRoof = false
+local ambushDown = false
+local rushSavedY = nil
+local roofY = 200 -- высота крыши (подбери под карту)
+local floorY = -50 -- низ (подбери под карту)
 
-local Title = Instance.new("TextLabel")
-Title.Size = UDim2.new(1, 0, 0, 40)
-Title.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-Title.Text = "DOORS UTILITY MENU (Press RightShift to Open/Close)"
-Title.TextColor3 = Color3.fromRGB(255, 255, 255)
-Title.TextSize = 13
-Title.Font = Enum.Font.SourceSansBold
-Title.Parent = MainFrame
+--// Уведомления
+local notifiedRush = {}
 
-local TitleCorner = Instance.new("UICorner")
-TitleCorner.CornerRadius = UDim.new(0, 8)
-TitleCorner.Parent = Title
-
-local ScrollingFrame = Instance.new("ScrollingFrame")
-ScrollingFrame.Size = UDim2.new(1, -20, 1, -60)
-ScrollingFrame.Position = UDim2.new(0, 10, 0, 50)
-ScrollingFrame.BackgroundTransparency = 1
-ScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 1400)
-ScrollingFrame.ScrollBarThickness = 6
-ScrollingFrame.Parent = MainFrame
-
-local UIListLayout = Instance.new("UIListLayout")
-UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
-UIListLayout.Padding = UDim.new(0, 8)
-UIListLayout.Parent = ScrollingFrame
-
---// Notification System
 local function SendNotification(title, text)
 	pcall(function()
 		StarterGui:SetCore("SendNotification", {
@@ -87,310 +74,700 @@ local function SendNotification(title, text)
 	end)
 end
 
---// UI Toggle
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if input.KeyCode == Enum.KeyCode.RightShift then
+--// ========================
+--// GUI
+--// ========================
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "DoorsGui"
+ScreenGui.ResetOnSpawn = false
+pcall(function() ScreenGui.Parent = CoreGui end)
+if ScreenGui.Parent ~= CoreGui then
+	ScreenGui.Parent = Player:WaitForChild("PlayerGui")
+end
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 540, 0, 480)
+MainFrame.Position = UDim2.new(0.5, -270, 0.5, -240)
+MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+MainFrame.BorderSizePixel = 0
+MainFrame.Visible = true
+MainFrame.Parent = ScreenGui
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, 0, 0, 38)
+Title.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+Title.Text = "🚪 DOORS UTILITY v2.0  |  RightShift = открыть/закрыть"
+Title.TextColor3 = Color3.fromRGB(220, 220, 220)
+Title.TextSize = 12
+Title.Font = Enum.Font.SourceSansBold
+Title.Parent = MainFrame
+Instance.new("UICorner", Title).CornerRadius = UDim.new(0, 10)
+
+-- Drag
+local draggingFrame = false
+local dragStart, startPos
+Title.InputBegan:Connect(function(i)
+	if i.UserInputType == Enum.UserInputType.MouseButton1 then
+		draggingFrame = true
+		dragStart = i.Position
+		startPos = MainFrame.Position
+	end
+end)
+UserInputService.InputChanged:Connect(function(i)
+	if draggingFrame and i.UserInputType == Enum.UserInputType.MouseMovement then
+		local delta = i.Position - dragStart
+		MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+	end
+end)
+UserInputService.InputEnded:Connect(function(i)
+	if i.UserInputType == Enum.UserInputType.MouseButton1 then draggingFrame = false end
+end)
+
+local ScrollingFrame = Instance.new("ScrollingFrame")
+ScrollingFrame.Size = UDim2.new(1, -16, 1, -50)
+ScrollingFrame.Position = UDim2.new(0, 8, 0, 44)
+ScrollingFrame.BackgroundTransparency = 1
+ScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 1900)
+ScrollingFrame.ScrollBarThickness = 5
+ScrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(80, 80, 80)
+ScrollingFrame.Parent = MainFrame
+
+local UIListLayout = Instance.new("UIListLayout")
+UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+UIListLayout.Padding = UDim.new(0, 6)
+UIListLayout.Parent = ScrollingFrame
+
+UserInputService.InputBegan:Connect(function(input, gp)
+	if not gp and input.KeyCode == Enum.KeyCode.RightShift then
 		MainFrame.Visible = not MainFrame.Visible
 	end
 end)
 
---// Universal Helper to create Billboard ESP
-local function CreateOrUpdateESP(parent, nameTag, textStr, textColor)
-	if not parent then return end
-	local targetPart = parent:IsA("BasePart") and parent or parent:FindFirstChildWhichIsA("BasePart")
-	if not targetPart then return end
-	
-	local bill = targetPart:FindFirstChild(nameTag)
-	if not bill then
-		bill = Instance.new("BillboardGui")
-		bill.Name = nameTag
-		bill.Size = UDim2.new(0, 110, 0, 45)
-		bill.AlwaysOnTop = true
-		bill.StudsOffset = Vector3.new(0, 2.5, 0)
-		
-		local txt = Instance.new("TextLabel")
-		txt.Name = "Text"
-		txt.Size = UDim2.new(1, 0, 1, 0)
-		txt.BackgroundTransparency = 1
-		txt.Text = textStr
-		txt.TextColor3 = textColor
-		txt.TextStrokeTransparency = 0
-		txt.TextSize = 15
-		txt.Font = Enum.Font.SourceSansBold
-		txt.Parent = bill
-		
-		bill.Parent = targetPart
-	end
+--// UI Helpers
+local function SectionLabel(text)
+	local lbl = Instance.new("TextLabel")
+	lbl.Size = UDim2.new(1, 0, 0, 24)
+	lbl.BackgroundColor3 = Color3.fromRGB(40, 40, 60)
+	lbl.Text = "  " .. text
+	lbl.TextColor3 = Color3.fromRGB(150, 180, 255)
+	lbl.TextSize = 12
+	lbl.Font = Enum.Font.SourceSansBold
+	lbl.TextXAlignment = Enum.TextXAlignment.Left
+	lbl.Parent = ScrollingFrame
+	Instance.new("UICorner", lbl).CornerRadius = UDim.new(0, 5)
 end
 
---// UI Builder Helpers
 local function CreateToggle(name, callback)
-	local ToggleBtn = Instance.new("TextButton")
-	ToggleBtn.Size = UDim2.new(1, 0, 0, 35)
-	ToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-	ToggleBtn.Text = name .. ": OFF"
-	ToggleBtn.TextColor3 = Color3.fromRGB(255, 100, 100)
-	ToggleBtn.TextSize = 14
-	ToggleBtn.Font = Enum.Font.SourceSansBold
-	ToggleBtn.Parent = ScrollingFrame
-	
-	local Corner = Instance.new("UICorner")
-	Corner.CornerRadius = UDim.new(0, 6)
-	Corner.Parent = ToggleBtn
-	
+	local btn = Instance.new("TextButton")
+	btn.Size = UDim2.new(1, 0, 0, 33)
+	btn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+	btn.Text = "  ○  " .. name .. ": ВЫКЛ"
+	btn.TextColor3 = Color3.fromRGB(200, 80, 80)
+	btn.TextSize = 13
+	btn.Font = Enum.Font.SourceSansBold
+	btn.TextXAlignment = Enum.TextXAlignment.Left
+	btn.Parent = ScrollingFrame
+	Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+
 	local state = false
-	ToggleBtn.MouseButton1Click:Connect(function()
+	btn.MouseButton1Click:Connect(function()
 		state = not state
 		if state then
-			ToggleBtn.Text = name .. ": ON"
-			ToggleBtn.TextColor3 = Color3.fromRGB(100, 255, 100)
+			btn.Text = "  ●  " .. name .. ": ВКЛ"
+			btn.TextColor3 = Color3.fromRGB(80, 220, 100)
+			btn.BackgroundColor3 = Color3.fromRGB(30, 50, 30)
 		else
-			ToggleBtn.Text = name .. ": OFF"
-			ToggleBtn.TextColor3 = Color3.fromRGB(255, 100, 100)
+			btn.Text = "  ○  " .. name .. ": ВЫКЛ"
+			btn.TextColor3 = Color3.fromRGB(200, 80, 80)
+			btn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 		end
 		callback(state)
 	end)
+	return btn
 end
 
 local function CreateSlider(name, min, max, default, callback)
 	local Container = Instance.new("Frame")
-	Container.Size = UDim2.new(1, 0, 0, 50)
-	Container.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+	Container.Size = UDim2.new(1, 0, 0, 52)
+	Container.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 	Container.Parent = ScrollingFrame
-	
-	local Corner = Instance.new("UICorner")
-	Corner.CornerRadius = UDim.new(0, 6)
-	Corner.Parent = Container
-	
+	Instance.new("UICorner", Container).CornerRadius = UDim.new(0, 6)
+
 	local Label = Instance.new("TextLabel")
-	Label.Size = UDim2.new(1, 0, 0, 20)
+	Label.Size = UDim2.new(1, -8, 0, 22)
+	Label.Position = UDim2.new(0, 8, 0, 2)
 	Label.BackgroundTransparency = 1
 	Label.Text = name .. ": " .. tostring(default)
-	Label.TextColor3 = Color3.fromRGB(255, 255, 255)
-	Label.TextSize = 14
+	Label.TextColor3 = Color3.fromRGB(220, 220, 220)
+	Label.TextSize = 13
 	Label.Font = Enum.Font.SourceSansBold
+	Label.TextXAlignment = Enum.TextXAlignment.Left
 	Label.Parent = Container
-	
+
 	local SliderBar = Instance.new("TextButton")
-	SliderBar.Size = UDim2.new(0.9, 0, 0, 10)
-	SliderBar.Position = UDim2.new(0.05, 0, 0, 30)
-	SliderBar.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
+	SliderBar.Size = UDim2.new(0.92, 0, 0, 10)
+	SliderBar.Position = UDim2.new(0.04, 0, 0, 34)
+	SliderBar.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
 	SliderBar.Text = ""
 	SliderBar.Parent = Container
-	
-	local SliderCorner = Instance.new("UICorner")
-	SliderCorner.CornerRadius = UDim.new(0, 4)
-	SliderCorner.Parent = SliderBar
-	
+	Instance.new("UICorner", SliderBar).CornerRadius = UDim.new(0, 4)
+
 	local Fill = Instance.new("Frame")
 	Fill.Size = UDim2.new((default - min)/(max - min), 0, 1, 0)
-	Fill.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+	Fill.BackgroundColor3 = Color3.fromRGB(60, 130, 255)
 	Fill.BorderSizePixel = 0
 	Fill.Parent = SliderBar
-	
-	local FillCorner = Instance.new("UICorner")
-	FillCorner.CornerRadius = UDim.new(0, 4)
-	FillCorner.Parent = Fill
-	
+	Instance.new("UICorner", Fill).CornerRadius = UDim.new(0, 4)
+
 	local dragging = false
-	SliderBar.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 then
-			dragging = true
-		end
+	SliderBar.InputBegan:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = true end
 	end)
-	UserInputService.InputEnded:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 then
-			dragging = false
-		end
+	UserInputService.InputEnded:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
 	end)
-	UserInputService.InputChanged:Connect(function(input)
-		if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-			local mousePos = UserInputService:GetMouseLocation().X
-			local barPos = SliderBar.AbsolutePosition.X
-			local barSize = SliderBar.AbsoluteSize.X
-			local percent = math.clamp((mousePos - barPos)/barSize, 0, 1)
-			Fill.Size = UDim2.new(percent, 0, 1, 0)
-			local val = math.floor(min + (max - min) * percent)
+	UserInputService.InputChanged:Connect(function(i)
+		if dragging and i.UserInputType == Enum.UserInputType.MouseMovement then
+			local mx = UserInputService:GetMouseLocation().X
+			local bx = SliderBar.AbsolutePosition.X
+			local bw = SliderBar.AbsoluteSize.X
+			local pct = math.clamp((mx - bx) / bw, 0, 1)
+			Fill.Size = UDim2.new(pct, 0, 1, 0)
+			local val = math.floor(min + (max - min) * pct)
 			Label.Text = name .. ": " .. tostring(val)
 			callback(val)
 		end
 	end)
 end
 
---// FEATURES IMPLEMENTATION //--
+--// ========================
+--// GUI Sections
+--// ========================
 
--- 1. Correct & Dupe Doors ESP
-local doorsESPEnabled = false
-CreateToggle("Doors ESP (Correct & Dupe)", function(state) doorsESPEnabled = state end)
+SectionLabel("🔑  Предметы и двери")
+CreateToggle("Двери ESP (правильная / дубль)", function(s) doorsESPEnabled = s refreshDoorsESP() end)
+CreateToggle("Ключ ESP", function(s) keyESPEnabled = s refreshKeysESP() end)
+CreateToggle("Рычаг для ворот ESP", function(s) leverESPEnabled = s end)
+CreateToggle("Книги (комната 50) ESP", function(s) booksESP = s refreshBooksESP() end)
+CreateToggle("Крест (Crucifix) ESP", function(s) crucifixESP = s refreshCrucifixESP() end)
+CreateToggle("Предметы в столе (витамины и т.д.) ESP", function(s) itemsESP = s refreshItemsESP() end)
+CreateToggle("Ловушки (комн. 90-99) ESP", function(s) snareESP = s end)
+CreateToggle("Рычаги (комн. 100) ESP", function(s) polesESP = s end)
 
--- 2. Rush & Ambush ESP + Notifications
-local rushAmbushESP = false
-local rushNotifications = false
-CreateToggle("Rush & Ambush ESP", function(state) rushAmbushESP = state end)
-CreateToggle("Rush & Ambush Notifications", function(state) rushNotifications = state end)
+SectionLabel("👁  Монстры")
+CreateToggle("Rush & Ambush ESP", function(s) rushAmbushESP = s end)
+CreateToggle("Rush & Ambush Уведомления", function(s) rushNotifications = s end)
+CreateToggle("Rush → телепорт на крышу", function(s) rushRoofEnabled = s end)
+CreateToggle("Ambush → телепорт вниз", function(s) ambushDownEnabled = s end)
+CreateToggle("Seek авто-уклон (вниз под пол)", function(s) seekAutoRun = s if not s then stopSeekLoop() end end)
+CreateToggle("Eyes ESP", function(s) eyesESP = s end)
+CreateToggle("Eyes Анти-урон (камера вниз)", function(s) eyesAntiDamage = s end)
+CreateToggle("Screech Уведомления", function(s) screechNotif = s end)
+CreateToggle("Screech Авто-поворот камеры", function(s) screechAutoTurn = s end)
+CreateToggle("Figure ESP", function(s) figureESP = s end)
+CreateToggle("Figure Авто-отход", function(s) figureAvoid = s end)
+CreateSlider("Figure радиус отхода", 10, 40, 15, function(v) avoidRadius = v end)
 
--- 3. Full Bright
-local fullBrightEnabled = false
-CreateToggle("Full Bright", function(state)
-	fullBrightEnabled = state
-	if state then
+SectionLabel("🏃  Игрок")
+CreateToggle("Кастомная скорость", function(s) speedEnabled = s end)
+CreateSlider("Скорость", 16, 60, 16, function(v) customSpeed = v end)
+CreateToggle("Анти-телепорт", function(s) antiTpEnabled = s end)
+CreateSlider("FOV", 50, 120, 70, function(v)
+	customFOV = v
+	Camera.FieldOfView = v
+end)
+
+SectionLabel("👥  Игроки")
+CreateToggle("ESP игроков (ники + подсветка)", function(s) playerESPEnabled = s end)
+
+SectionLabel("💡  Прочее")
+CreateToggle("Full Bright", function(s)
+	fullBrightEnabled = s
+	if s then
 		game.Lighting.Brightness = 2
 		game.Lighting.ClockTime = 14
 		game.Lighting.GlobalShadows = false
 		game.Lighting.OutdoorAmbient = Color3.fromRGB(255, 255, 255)
 	else
 		game.Lighting.GlobalShadows = true
+		game.Lighting.Brightness = 1
+		game.Lighting.ClockTime = 0
+		game.Lighting.OutdoorAmbient = Color3.fromRGB(127, 127, 127)
 	end
 end)
 
--- 4. Key ESP
-local keyESPEnabled = false
-CreateToggle("Key ESP", function(state) keyESPEnabled = state end)
+--// ========================
+--// ESP CORE — БЕЗ ЛАГОВ
+--// Создаём Billboard один раз, не каждый кадр
+--// ========================
 
--- 5. Lever For Gate ESP
-local leverESPEnabled = false
-CreateToggle("Lever For Gate ESP", function(state) leverESPEnabled = state end)
-
--- 6. Custom Speed & Anti-Teleport
-local customSpeed = 16
-local speedEnabled = false
-local antiTpEnabled = false
-CreateToggle("Enable Custom Speed", function(state) speedEnabled = state end)
-CreateSlider("Speed Value", 16, 40, 16, function(val) customSpeed = val end)
-CreateToggle("Anti-Teleport / Safe Speed", function(state) antiTpEnabled = state end)
-
--- 7. Eyes Feature (ESP & Anti-Damage)
-local eyesESP = false
-local eyesAntiDamage = false
-CreateToggle("Eyes ESP", function(state) eyesESP = state end)
-CreateToggle("Eyes Anti-Damage", function(state) eyesAntiDamage = state end)
-
--- 8. Screech Handler
-local screechAutoTurn = false
-local screechNotif = false
-CreateToggle("Screech Notifications", function(state) screechNotif = state end)
-CreateToggle("Screech Auto-Turn Camera", function(state) screechAutoTurn = state end)
-
--- 9. Figure ESP & Bypass/Avoidance
-local figureESP = false
-local figureAvoid = false
-local avoidRadius = 15
-CreateToggle("Figure ESP", function(state) figureESP = state end)
-CreateToggle("Figure Avoidance", function(state) figureAvoid = state end)
-CreateSlider("Figure Avoid Radius", 10, 40, 15, function(val) avoidRadius = val end)
-
--- 10. Room 50 Books ESP
-local booksESP = false
-CreateToggle("Room 50 Books ESP", function(state) booksESP = state end)
-
--- 11. Snares ESP (90-99)
-local snareESP = false
-CreateToggle("Snares ESP (90-99)", function(state) snareESP = state end)
-
--- 12. Room 100 Breaker Poles ESP
-local polesESP = false
-CreateToggle("Room 100 Breaker Poles ESP", function(state) polesESP = state end)
-
-
---// MAIN ENGINE TICK LOOP //--
-local notifiedRush = {}
-
-RunService.RenderStepped:Connect(function()
-	local currentRooms = Workspace:FindFirstChild("CurrentRooms")
+local function MakeESP(part, tag, text, color)
+	if not part or not part.Parent then return end
+	if part:FindFirstChild(tag) then return end -- уже есть, не создаём
 	
-	-- Doors & Room-based Items Loop
+	local bill = Instance.new("BillboardGui")
+	bill.Name = tag
+	bill.Size = UDim2.new(0, 120, 0, 40)
+	bill.AlwaysOnTop = true
+	bill.StudsOffset = Vector3.new(0, 3, 0)
+	bill.Adornee = part
+	bill.Parent = part
+
+	local lbl = Instance.new("TextLabel")
+	lbl.Size = UDim2.new(1, 0, 1, 0)
+	lbl.BackgroundTransparency = 1
+	lbl.Text = text
+	lbl.TextColor3 = color
+	lbl.TextStrokeTransparency = 0
+	lbl.TextStrokeColor3 = Color3.new(0, 0, 0)
+	lbl.TextSize = 14
+	lbl.Font = Enum.Font.SourceSansBold
+	lbl.Parent = bill
+end
+
+local function RemoveESP(part, tag)
+	if part then
+		local b = part:FindFirstChild(tag)
+		if b then b:Destroy() end
+	end
+end
+
+local function GetPrimaryPart(obj)
+	if obj:IsA("BasePart") then return obj end
+	return obj:FindFirstChildWhichIsA("BasePart")
+end
+
+--// ========================
+--// EVENT-BASED ESP (не лагает)
+--// ========================
+
+-- Отслеживаем CurrentRooms
+local currentRooms = Workspace:WaitForChild("CurrentRooms", 10)
+local roomConnections = {}
+
+local function HandleDescendant(desc, room)
+	-- Двери
+	if desc.Name == "Door" or desc.Name == "dupeDoor" then
+		local isDupe = desc:FindFirstChild("dupeDoor") or desc.Name == "dupeDoor"
+		local part = GetPrimaryPart(desc)
+		if part then
+			if doorsESPEnabled then
+				local tag = isDupe and "ДУБЛЬ ДВЕРЬ" or "ПРАВИЛЬНАЯ ДВЕРЬ"
+				local col = isDupe and Color3.fromRGB(255, 60, 60) or Color3.fromRGB(60, 255, 60)
+				MakeESP(part, "DoorsESP", tag, col)
+			end
+			desc.AncestryChanged:Connect(function()
+				if not desc.Parent then RemoveESP(part, "DoorsESP") end
+			end)
+		end
+	end
+
+	-- Ключ (KeyObtain прямо в Assets или внутри мебели)
+	if desc.Name == "KeyObtain" then
+		local part = GetPrimaryPart(desc) or desc
+		if part and keyESPEnabled then
+			MakeESP(part, "KeyESP", "🔑 КЛЮЧ", Color3.fromRGB(255, 230, 0))
+		end
+		desc.AncestryChanged:Connect(function()
+			if not desc.Parent then RemoveESP(part, "KeyESP") end
+		end)
+	end
+
+	-- Ключ из Dresser / DrawerContainer
+	if desc.Name == "Dresser" or desc.Name == "DrawerContainer" then
+		local kObt = desc:FindFirstChild("KeyObtain", true)
+		if kObt then
+			local hit = kObt:FindFirstChild("Hitbox") or kObt:FindFirstChild("KeyHitbox") or kObt
+			local part = GetPrimaryPart(hit) or hit
+			if part and keyESPEnabled then
+				MakeESP(part, "KeyESP", "🔑 КЛЮЧ", Color3.fromRGB(255, 230, 0))
+			end
+			desc.AncestryChanged:Connect(function()
+				if not desc.Parent then RemoveESP(part, "KeyESP") end
+			end)
+		end
+	end
+
+	-- Рычаг
+	if desc.Name == "LeverForGate" and leverESPEnabled then
+		local part = GetPrimaryPart(desc)
+		if part then
+			MakeESP(part, "LeverESP", "🔧 РЫЧАГ", Color3.fromRGB(255, 255, 0))
+			desc.AncestryChanged:Connect(function()
+				if not desc.Parent then RemoveESP(part, "LeverESP") end
+			end)
+		end
+	end
+
+	-- Книги (комн. 50)
+	if desc.Name == "LiveHintBook" and booksESP then
+		local part = GetPrimaryPart(desc) or desc
+		MakeESP(part, "BookESP", "📖 КНИГА", Color3.fromRGB(0, 220, 255))
+		desc.AncestryChanged:Connect(function()
+			if not desc.Parent then RemoveESP(part, "BookESP") end
+		end)
+	end
+
+	-- Crucifix (крест)
+	if desc.Name == "CrucifixWall" and crucifixESP then
+		local part = GetPrimaryPart(desc) or desc
+		MakeESP(part, "CrucifixESP", "✝ КРЕСТ", Color3.fromRGB(255, 200, 50))
+		desc.AncestryChanged:Connect(function()
+			if not desc.Parent then RemoveESP(part, "CrucifixESP") end
+		end)
+	end
+
+	-- Предметы в Rolltop_Desk (витамины и т.д., исключаем Lid)
+	if desc.Name == "RolltopContainer" and itemsESP then
+		for _, child in ipairs(desc:GetChildren()) do
+			if child.Name ~= "Lid" then
+				local part = GetPrimaryPart(child) or child
+				if part then
+					MakeESP(part, "ItemESP", "💊 " .. child.Name, Color3.fromRGB(180, 255, 100))
+				end
+			end
+		end
+		desc.ChildAdded:Connect(function(child)
+			if child.Name ~= "Lid" and itemsESP then
+				local part = GetPrimaryPart(child) or child
+				if part then MakeESP(part, "ItemESP", "💊 " .. child.Name, Color3.fromRGB(180, 255, 100)) end
+			end
+		end)
+	end
+
+	-- Ловушки (90-99)
+	if desc.Name == "Snare" and snareESP then
+		local base = desc:FindFirstChild("SnareBase") or desc
+		local part = GetPrimaryPart(base) or base
+		MakeESP(part, "SnareESP", "⚠ ЛОВУШКА", Color3.fromRGB(255, 128, 0))
+		desc.AncestryChanged:Connect(function()
+			if not desc.Parent then RemoveESP(part, "SnareESP") end
+		end)
+	end
+
+	-- Рычаги (100)
+	if desc.Name == "LiveBreakerPolePickup" and polesESP then
+		local part = GetPrimaryPart(desc) or desc
+		MakeESP(part, "PoleESP", "⚡ РЫЧАГ 100", Color3.fromRGB(60, 255, 60))
+		desc.AncestryChanged:Connect(function()
+			if not desc.Parent then RemoveESP(part, "PoleESP") end
+		end)
+	end
+end
+
+-- Refresh-функции (вызываются при включении Toggle)
+function refreshDoorsESP()
+	if not currentRooms then return end
+	for _, room in ipairs(currentRooms:GetChildren()) do
+		for _, desc in ipairs(room:GetDescendants()) do
+			if desc.Name == "Door" or desc.Name == "dupeDoor" then
+				local isDupe = desc.Name == "dupeDoor" or desc:FindFirstChild("dupeDoor")
+				local part = GetPrimaryPart(desc)
+				if part then
+					if doorsESPEnabled then
+						local tag = isDupe and "ДУБЛЬ ДВЕРЬ" or "ПРАВИЛЬНАЯ ДВЕРЬ"
+						local col = isDupe and Color3.fromRGB(255,60,60) or Color3.fromRGB(60,255,60)
+						MakeESP(part, "DoorsESP", tag, col)
+					else
+						RemoveESP(part, "DoorsESP")
+					end
+				end
+			end
+		end
+	end
+end
+
+function refreshKeysESP()
+	if not currentRooms then return end
+	for _, room in ipairs(currentRooms:GetChildren()) do
+		for _, desc in ipairs(room:GetDescendants()) do
+			if desc.Name == "KeyObtain" then
+				local part = GetPrimaryPart(desc) or desc
+				if keyESPEnabled then MakeESP(part, "KeyESP", "🔑 КЛЮЧ", Color3.fromRGB(255,230,0))
+				else RemoveESP(part, "KeyESP") end
+			end
+		end
+	end
+end
+
+function refreshBooksESP()
+	if not currentRooms then return end
+	for _, room in ipairs(currentRooms:GetChildren()) do
+		for _, desc in ipairs(room:GetDescendants()) do
+			if desc.Name == "LiveHintBook" then
+				local part = GetPrimaryPart(desc) or desc
+				if booksESP then MakeESP(part, "BookESP", "📖 КНИГА", Color3.fromRGB(0,220,255))
+				else RemoveESP(part, "BookESP") end
+			end
+		end
+	end
+end
+
+function refreshCrucifixESP()
+	if not currentRooms then return end
+	for _, room in ipairs(currentRooms:GetChildren()) do
+		for _, desc in ipairs(room:GetDescendants()) do
+			if desc.Name == "CrucifixWall" then
+				local part = GetPrimaryPart(desc) or desc
+				if crucifixESP then MakeESP(part, "CrucifixESP", "✝ КРЕСТ", Color3.fromRGB(255,200,50))
+				else RemoveESP(part, "CrucifixESP") end
+			end
+		end
+	end
+end
+
+function refreshItemsESP()
+	if not currentRooms then return end
+	for _, room in ipairs(currentRooms:GetChildren()) do
+		for _, desc in ipairs(room:GetDescendants()) do
+			if desc.Name == "RolltopContainer" then
+				for _, child in ipairs(desc:GetChildren()) do
+					if child.Name ~= "Lid" then
+						local part = GetPrimaryPart(child) or child
+						if part then
+							if itemsESP then MakeESP(part, "ItemESP", "💊 " .. child.Name, Color3.fromRGB(180,255,100))
+							else RemoveESP(part, "ItemESP") end
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+-- Вешаем DescendantAdded на каждую новую комнату
+if currentRooms then
+	currentRooms.ChildAdded:Connect(function(room)
+		-- Сначала обрабатываем уже существующих потомков
+		for _, desc in ipairs(room:GetDescendants()) do
+			HandleDescendant(desc, room)
+		end
+		-- Потом ловим новых
+		room.DescendantAdded:Connect(function(desc)
+			HandleDescendant(desc, room)
+		end)
+	end)
+	-- Уже загруженные комнаты
+	for _, room in ipairs(currentRooms:GetChildren()) do
+		for _, desc in ipairs(room:GetDescendants()) do
+			HandleDescendant(desc, room)
+		end
+		room.DescendantAdded:Connect(function(desc)
+			HandleDescendant(desc, room)
+		end)
+	end
+end
+
+--// ========================
+--// SEEK АВТО-УКЛОН
+--// ========================
+function stopSeekLoop()
+	seekActive = false
+	if seekMoveLoop then
+		seekMoveLoop:Disconnect()
+		seekMoveLoop = nil
+	end
+	-- Вернуть игрока на место
+	if originalCFrame and HumanoidRootPart then
+		HumanoidRootPart.CFrame = originalCFrame
+	end
+	originalCFrame = nil
+end
+
+local function startSeekLoop()
+	if seekActive then return end
+	seekActive = true
+	originalCFrame = HumanoidRootPart.CFrame
+	-- Опустить игрока под пол (невидим для Seek)
+	seekMoveLoop = RunService.Heartbeat:Connect(function()
+		if not seekActive then return end
+		if not HumanoidRootPart then return end
+		-- Держим игрока низко
+		local pos = HumanoidRootPart.Position
+		HumanoidRootPart.CFrame = CFrame.new(pos.X, floorY, pos.Z)
+	end)
+end
+
+--// ========================
+--// RUSH/AMBUSH ТЕЛЕПОРТ
+--// ========================
+local rushPresent = false
+local ambushPresent = false
+
+--// ========================
+--// PLAYER ESP (ники + подсветка)
+--// ========================
+local playerESPConnections = {}
+
+local function UpdatePlayerESP()
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr == Player then continue end
+		local char = plr.Character
+		if not char then continue end
+		local hrp = char:FindFirstChild("HumanoidRootPart")
+		if hrp then
+			if playerESPEnabled then
+				MakeESP(hrp, "PlayerESP", "👤 " .. plr.Name, Color3.fromRGB(100, 200, 255))
+			else
+				RemoveESP(hrp, "PlayerESP")
+			end
+		end
+		-- Highlight
+		local hl = char:FindFirstChildOfClass("SelectionBox") or (playerESPEnabled and Instance.new("SelectionBox") or nil)
+		if hl and playerESPEnabled then
+			hl.Name = "PlayerHL"
+			hl.Adornee = char
+			hl.Color3 = Color3.fromRGB(100, 200, 255)
+			hl.LineThickness = 0.04
+			hl.SurfaceTransparency = 0.8
+			hl.SurfaceColor3 = Color3.fromRGB(100, 200, 255)
+			hl.Parent = char
+		elseif not playerESPEnabled then
+			local existing = char:FindFirstChild("PlayerHL")
+			if existing then existing:Destroy() end
+		end
+	end
+end
+
+--// ========================
+--// ГЛАВНЫЙ LOOP (только динамика)
+--// ========================
+local lastPosition = Vector3.new()
+
+RunService.Heartbeat:Connect(function()
+	-- Скорость
+	if speedEnabled and Humanoid then
+		Humanoid.WalkSpeed = customSpeed
+	end
+
+	-- Анти-телепорт
+	if antiTpEnabled and HumanoidRootPart then
+		if (HumanoidRootPart.Position - lastPosition).Magnitude > 50 and not Workspace:GetAttribute("InElevator") then
+			HumanoidRootPart.CFrame = CFrame.new(lastPosition)
+		else
+			lastPosition = HumanoidRootPart.Position
+		end
+	elseif HumanoidRootPart then
+		lastPosition = HumanoidRootPart.Position
+	end
+end)
+
+-- Мировой скан (монстры) — реже, чем Heartbeat
+local scanTick = 0
+RunService.RenderStepped:Connect(function(dt)
+	scanTick = scanTick + dt
+	if scanTick < 0.15 then return end -- сканируем раз в 0.15 сек, не каждый кадр
+	scanTick = 0
+
+	local wsChildren = Workspace:GetChildren()
+
+	-- Rush & Ambush
+	local rushFound = false
+	local ambushFound = false
+	for _, obj in ipairs(wsChildren) do
+		local isRush = obj.Name == "RushMoving"
+		local isAmbush = obj.Name == "AmbushMoving"
+		if isRush or isAmbush then
+			-- Уведомление
+			if rushNotifications and not notifiedRush[obj] then
+				notifiedRush[obj] = true
+				SendNotification("⚠ ВНИМАНИЕ!", obj.Name .. " летит!")
+			end
+			-- ESP
+			if rushAmbushESP then
+				local part = GetPrimaryPart(obj)
+				if part then
+					local lbl = isRush and "💨 РАШ" or "🌀 АМБУШ"
+					MakeESP(part, "RushAmbushESP", lbl, Color3.fromRGB(255, 60, 60))
+				end
+			end
+			-- Телепорт Rush → крыша
+			if isRush then
+				rushFound = true
+				if rushRoofEnabled and HumanoidRootPart and not rushOnRoof then
+					rushOnRoof = true
+					rushSavedY = HumanoidRootPart.Position.Y
+					local pos = HumanoidRootPart.Position
+					HumanoidRootPart.CFrame = CFrame.new(pos.X, roofY, pos.Z)
+				end
+			end
+			-- Телепорт Ambush → вниз
+			if isAmbush then
+				ambushFound = true
+				if ambushDownEnabled and HumanoidRootPart and not ambushDown then
+					ambushDown = true
+					local pos = HumanoidRootPart.Position
+					HumanoidRootPart.CFrame = CFrame.new(pos.X, floorY, pos.Z)
+				end
+			end
+		end
+	end
+
+	-- Возврат после Rush
+	if not rushFound and rushOnRoof then
+		rushOnRoof = false
+		if rushRoofEnabled and HumanoidRootPart and rushSavedY then
+			local pos = HumanoidRootPart.Position
+			HumanoidRootPart.CFrame = CFrame.new(pos.X, rushSavedY, pos.Z)
+		end
+	end
+	if not ambushFound and ambushDown then
+		ambushDown = false
+	end
+
+	-- Eyes
+	for _, obj in ipairs(wsChildren) do
+		if obj.Name == "Eyes" then
+			if eyesESP then
+				local part = GetPrimaryPart(obj)
+				if part then MakeESP(part, "EyesESP", "👁 EYES", Color3.fromRGB(180, 0, 255)) end
+			end
+			if eyesAntiDamage and HumanoidRootPart then
+				Camera.CFrame = CFrame.new(Camera.CFrame.Position, Camera.CFrame.Position + Vector3.new(0, -5, 5))
+			end
+		end
+	end
+
+	-- Screech
+	for _, name in ipairs({"Screech", "ScreechRetro", "ScreechRushMode"}) do
+		local s = Workspace:FindFirstChild(name, true)
+		if s then
+			if screechNotif and not s:GetAttribute("Notified") then
+				s:SetAttribute("Notified", true)
+				SendNotification("😱 SCREECH!", "Скрич появился!")
+			end
+			if screechAutoTurn then
+				local part = s:FindFirstChild("HumanoidRootPart") or s:FindFirstChildWhichIsA("BasePart")
+				if part then
+					Camera.CFrame = CFrame.new(Camera.CFrame.Position, part.Position)
+				end
+			end
+		end
+	end
+
+	-- Seek авто-уклон
+	if seekAutoRun then
+		local seek = Workspace:FindFirstChild("SeekMovingNewClone")
+		if seek and not seekActive then
+			startSeekLoop()
+		elseif not seek and seekActive then
+			stopSeekLoop()
+		end
+	end
+
+	-- Figure
 	if currentRooms then
 		for _, room in ipairs(currentRooms:GetChildren()) do
-			-- 1. Doors ESP (Correct & Dupe)
-			if doorsESPEnabled then
-				local door = room:FindFirstChild("Door", true)
-				if door then
-					local isDupe = door:FindFirstChild("dupeDoor") or door.Name == "dupeDoor"
-					if isDupe then
-						CreateOrUpdateESP(door, "DoorsESP", "DUPE DOOR", Color3.fromRGB(255, 0, 0))
-					else
-						CreateOrUpdateESP(door, "DoorsESP", "CORRECT DOOR", Color3.fromRGB(0, 255, 0))
-					end
-				end
-			end
-			
-			-- 5. Lever For Gate ESP
-			if leverESPEnabled then
-				local assets = room:FindFirstChild("Assets")
-				if assets then
-					for _, item in ipairs(assets:GetDescendants()) do
-						if item.Name == "LeverForGate" then
-							CreateOrUpdateESP(item, "LeverESP", "LEVER", Color3.fromRGB(255, 255, 0))
-						end
-					end
-				end
-			end
-			
-			-- 4. Key ESP
-			if keyESPEnabled then
-				local assets = room:FindFirstChild("Assets")
-				if assets then
-					for _, dresser in ipairs(assets:GetDescendants()) do
-						if dresser.Name == "Dresser" or dresser.Name == "DrawerContainer" then
-							local keyObtain = dresser:FindFirstChild("KeyObtain", true)
-							if keyObtain then
-								local hit = keyObtain:FindFirstChild("Hitbox") or keyObtain:FindFirstChild("KeyHitbox") or keyObtain
-								CreateOrUpdateESP(hit, "KeyESP", "KEY", Color3.fromRGB(255, 255, 0))
-							end
-						end
-					end
-				end
-			end
-			
-			-- 9. Room 50 Books ESP
-			if booksESP then
-				local assets = room:FindFirstChild("Assets")
-				if assets then
-					for _, shelf in ipairs(assets:GetDescendants()) do
-						if shelf.Name == "Modular_Bookshelf" then
-							local liveBook = shelf:FindFirstChild("LiveHintBook", true)
-							if liveBook then
-								CreateOrUpdateESP(liveBook, "BookESP", "BOOK", Color3.fromRGB(0, 255, 255))
-							end
-						end
-					end
-				end
-			end
-			
-			-- 11. Snares ESP (90-99)
-			if snareESP then
-				local assets = room:FindFirstChild("Assets")
-				if assets then
-					for _, snareModel in ipairs(assets:GetDescendants()) do
-						if snareModel.Name == "Snare" then
-							local base = snareModel:FindFirstChild("SnareBase") or snareModel
-							CreateOrUpdateESP(base, "SnareESP", "TRAP", Color3.fromRGB(255, 128, 0))
-						end
-					end
-				end
-			end
-			
-			-- 12. Room 100 Breaker Poles ESP
-			if polesESP then
-				for _, pole in ipairs(room:GetDescendants()) do
-					if pole.Name == "LiveBreakerPolePickup" then
-						CreateOrUpdateESP(pole, "PoleESP", "LEVER", Color3.fromRGB(0, 255, 0))
-					end
-				end
-			end
-			
-			-- 8. Figure ESP & Avoidance
 			local rig = room:FindFirstChild("FigureRig", true) or room:FindFirstChild("FigureSetup", true)
 			if rig then
-				local primaryPart = rig:FindFirstChild("HumanoidRootPart") or rig:FindFirstChildWhichIsA("BasePart")
-				if primaryPart then
-					if figureESP then
-						CreateOrUpdateESP(primaryPart, "FigureESP", "FIGURE", Color3.fromRGB(255, 0, 0))
-					end
-					if figureAvoid and Humanoid and HumanoidRootPart then
-						local dist = (HumanoidRootPart.Position - primaryPart.Position).Magnitude
+				local pp = rig:FindFirstChild("HumanoidRootPart") or rig:FindFirstChildWhichIsA("BasePart")
+				if pp then
+					if figureESP then MakeESP(pp, "FigureESP", "👹 FIGURE", Color3.fromRGB(255, 0, 0)) end
+					if figureAvoid and HumanoidRootPart and Humanoid then
+						local dist = (HumanoidRootPart.Position - pp.Position).Magnitude
 						if dist < avoidRadius then
-							local dir = (HumanoidRootPart.Position - primaryPart.Position).Unit
+							local dir = (HumanoidRootPart.Position - pp.Position).Unit
 							Humanoid:Move(dir * 2)
 						end
 					end
@@ -398,66 +775,11 @@ RunService.RenderStepped:Connect(function()
 			end
 		end
 	end
-	
-	-- 2. Rush & Ambush ESP + Notifications (Global Workspace scan)
-	for _, obj in ipairs(Workspace:GetChildren()) do
-		if obj.Name == "RushMoving" or obj.Name == "AmbushMoving" then
-			if rushNotifications and not notifiedRush[obj] then
-				notifiedRush[obj] = true
-				SendNotification("WARNING!", obj.Name .. " is incoming!")
-			end
-			if rushAmbushESP then
-				CreateOrUpdateESP(obj, "RushAmbushESP", obj.Name:upper(), Color3.fromRGB(255, 50, 50))
-			end
-		end
-		
-		-- 7. Eyes ESP & Anti-Damage
-		if obj.Name == "Eyes" then
-			if eyesESP then
-				CreateOrUpdateESP(obj, "EyesESP", "EYES", Color3.fromRGB(150, 0, 255))
-			end
-			if eyesAntiDamage and HumanoidRootPart then
-				local direct = obj:FindFirstChild("Hitbox") or obj:FindFirstChildWhichIsA("BasePart")
-				if direct then
-					Camera.CFrame = CFrame.new(Camera.CFrame.Position, Vector3.new(Camera.CFrame.Position.X, Camera.CFrame.Position.Y - 10, Camera.CFrame.Position.Z + 10))
-				end
-			end
-		end
-	end
-	
-	-- 8. Screech Global Handler
-	for _, entityName in ipairs({"Screech", "ScreechRetro", "ScreechRushMode"}) do
-		local screech = Workspace:FindFirstChild(entityName, true)
-		if screech then
-			if screechNotif and not screech:GetAttribute("Notified") then
-				screech:SetAttribute("Notified", true)
-				SendNotification("SCREECH!", "Screech has appeared!")
-			end
-			if screechAutoTurn then
-				local part = screech:FindFirstChild("HumanoidRootPart") or screech:FindFirstChildWhichIsA("BasePart")
-				if part then
-					Camera.CFrame = CFrame.new(Camera.CFrame.Position, part.Position)
-				end
-			end
-		end
+
+	-- Игроки ESP
+	if playerESPEnabled then
+		UpdatePlayerESP()
 	end
 end)
 
--- 6. Speed & Anti-Teleport Loop
-local lastPosition = Vector3.new()
-RunService.Stepped:Connect(function()
-	if speedEnabled and Humanoid and HumanoidRootPart then
-		Humanoid.WalkSpeed = customSpeed
-		if antiTpEnabled then
-			if (HumanoidRootPart.Position - lastPosition).Magnitude > 50 and not Workspace:GetAttribute("InElevator") then
-				HumanoidRootPart.CFrame = CFrame.new(lastPosition)
-			else
-				lastPosition = HumanoidRootPart.Position
-			end
-		else
-			lastPosition = HumanoidRootPart.Position
-		end
-	end
-end)
-
-SendNotification("Doors Script Loaded", "Press RightShift to open/close menu.")
+SendNotification("Doors v2.0 Загружен", "RightShift = меню. Лаги исправлены!")
