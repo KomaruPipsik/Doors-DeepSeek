@@ -1,4 +1,4 @@
---// DOORS SCRIPT (FULL VERSION)
+--// DOORS SCRIPT (FULL VERSION & FIXED ESP + RUSH/AMBUSH)
 --// Services
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -7,8 +7,10 @@ local RunService = game:GetService("RunService")
 local CoreGui = game:GetService("CoreGui")
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
+local StarterGui = game:GetService("StarterGui")
 
 local Player = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
 local Character = Player.Character or Player.CharacterAdded:Wait()
 local Humanoid = Character:WaitForChild("Humanoid")
 local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
@@ -37,8 +39,8 @@ end
 
 -- Main Frame
 local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 500, 0, 400)
-MainFrame.Position = UDim2.new(0.5, -250, 0.5, -200)
+MainFrame.Size = UDim2.new(0, 520, 0, 420)
+MainFrame.Position = UDim2.new(0.5, -260, 0.5, -210)
 MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 MainFrame.BorderSizePixel = 0
 MainFrame.Visible = true
@@ -53,7 +55,7 @@ Title.Size = UDim2.new(1, 0, 0, 40)
 Title.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
 Title.Text = "DOORS UTILITY MENU (Press RightShift to Open/Close)"
 Title.TextColor3 = Color3.fromRGB(255, 255, 255)
-Title.TextSize = 14
+Title.TextSize = 13
 Title.Font = Enum.Font.SourceSansBold
 Title.Parent = MainFrame
 
@@ -65,7 +67,7 @@ local ScrollingFrame = Instance.new("ScrollingFrame")
 ScrollingFrame.Size = UDim2.new(1, -20, 1, -60)
 ScrollingFrame.Position = UDim2.new(0, 10, 0, 50)
 ScrollingFrame.BackgroundTransparency = 1
-ScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 1100)
+ScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 1400)
 ScrollingFrame.ScrollBarThickness = 6
 ScrollingFrame.Parent = MainFrame
 
@@ -77,7 +79,7 @@ UIListLayout.Parent = ScrollingFrame
 --// Notification System
 local function SendNotification(title, text)
 	pcall(function()
-		game:GetService("StarterGui"):SetCore("SendNotification", {
+		StarterGui:SetCore("SendNotification", {
 			Title = title,
 			Text = text,
 			Duration = 3
@@ -92,7 +94,36 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	end
 end)
 
---// Helper to create toggles and sliders
+--// Universal Helper to create Billboard ESP
+local function CreateOrUpdateESP(parent, nameTag, textStr, textColor)
+	if not parent then return end
+	local targetPart = parent:IsA("BasePart") and parent or parent:FindFirstChildWhichIsA("BasePart")
+	if not targetPart then return end
+	
+	local bill = targetPart:FindFirstChild(nameTag)
+	if not bill then
+		bill = Instance.new("BillboardGui")
+		bill.Name = nameTag
+		bill.Size = UDim2.new(0, 110, 0, 45)
+		bill.AlwaysOnTop = true
+		bill.StudsOffset = Vector3.new(0, 2.5, 0)
+		
+		local txt = Instance.new("TextLabel")
+		txt.Name = "Text"
+		txt.Size = UDim2.new(1, 0, 1, 0)
+		txt.BackgroundTransparency = 1
+		txt.Text = textStr
+		txt.TextColor3 = textColor
+		txt.TextStrokeTransparency = 0
+		txt.TextSize = 15
+		txt.Font = Enum.Font.SourceSansBold
+		txt.Parent = bill
+		
+		bill.Parent = targetPart
+	end
+end
+
+--// UI Builder Helpers
 local function CreateToggle(name, callback)
 	local ToggleBtn = Instance.new("TextButton")
 	ToggleBtn.Size = UDim2.new(1, 0, 0, 35)
@@ -186,86 +217,17 @@ local function CreateSlider(name, min, max, default, callback)
 	end)
 end
 
---// Features Implementation
+--// FEATURES IMPLEMENTATION //--
 
--- 1. Dupe Door ESP / Labeling
-local dupeESPEnabled = false
-CreateToggle("Dupe Doors ESP", function(state)
-	dupeESPEnabled = state
-end)
+-- 1. Correct & Dupe Doors ESP
+local doorsESPEnabled = false
+CreateToggle("Doors ESP (Correct & Dupe)", function(state) doorsESPEnabled = state end)
 
-RunService.RenderStepped:Connect(function()
-	if not dupeESPEnabled then return end
-	local currentRooms = Workspace:FindFirstChild("CurrentRooms")
-	if currentRooms then
-		for _, room in ipairs(currentRooms:GetChildren()) do
-			local dupeDoor = room:FindFirstChild("dupeDoor")
-			if dupeDoor then
-				for _, part in ipairs(dupeDoor:GetDescendants()) do
-					if part:IsA("BasePart") then
-						local bill = part:FindFirstChild("DupeBill")
-						if not bill then
-							bill = Instance.new("BillboardGui")
-							bill.Name = "DupeBill"
-							bill.Size = UDim2.new(0, 100, 0, 40)
-							bill.AlwaysOnTop = true
-							bill.StudsOffset = Vector3.new(0, 2, 0)
-							local txt = Instance.new("TextLabel")
-							txt.Size = UDim2.new(1, 0, 1, 0)
-							txt.BackgroundTransparency = 1
-							txt.Text = "DUPE DOOR"
-							txt.TextColor3 = Color3.fromRGB(255, 0, 0)
-							txt.TextSize = 14
-							txt.Font = Enum.Font.SourceSansBold
-							txt.Parent = bill
-							bill.Parent = part
-						end
-					end
-				end
-			end
-		end
-	end
-end)
-
--- 2. Rush & Ambush ESP & Notifications
+-- 2. Rush & Ambush ESP + Notifications
 local rushAmbushESP = false
 local rushNotifications = false
 CreateToggle("Rush & Ambush ESP", function(state) rushAmbushESP = state end)
 CreateToggle("Rush & Ambush Notifications", function(state) rushNotifications = state end)
-
-local notifiedRush = {}
-RunService.RenderStepped:Connect(function()
-	for _, obj in ipairs(Workspace:GetChildren()) do
-		if obj.Name == "RushMoving" or obj.Name == "AmbushMoving" then
-			if rushNotifications and not notifiedRush[obj] then
-				notifiedRush[obj] = true
-				SendNotification("WARNING!", obj.Name .. " is coming!")
-			end
-			if rushAmbushESP then
-				local part = obj:FindFirstChildWhichIsA("BasePart")
-				if part then
-					letBill = part:FindFirstChild("EntityBill")
-					if not letBill then
-						letBill = Instance.new("BillboardGui")
-						letBill.Name = "EntityBill"
-						letBill.Size = UDim2.new(0, 120, 0, 50)
-						letBill.AlwaysOnTop = true
-						letBill.StudsOffset = Vector3.new(0, 3, 0)
-						local txt = Instance.new("TextLabel")
-						txt.Size = UDim2.new(1, 0, 1, 0)
-						txt.BackgroundTransparency = 1
-						txt.Text = obj.Name:upper()
-						txt.TextColor3 = Color3.fromRGB(255, 50, 50)
-						txt.TextSize = 16
-						txt.Font = Enum.Font.SourceSansBold
-						txt.Parent = letBill
-						letBill.Parent = part
-					end
-				end
-			end
-		end
-	end
-end)
 
 -- 3. Full Bright
 local fullBrightEnabled = false
@@ -285,45 +247,11 @@ end)
 local keyESPEnabled = false
 CreateToggle("Key ESP", function(state) keyESPEnabled = state end)
 
-RunService.RenderStepped:Connect(function()
-	if not keyESPEnabled then return end
-	local currentRooms = Workspace:FindFirstChild("CurrentRooms")
-	if currentRooms then
-		for _, room in ipairs(currentRooms:GetChildren()) do
-			local assets = room:FindFirstChild("Assets")
-			if assets then
-				for _, dresser in ipairs(assets:GetDescendants()) do
-					if dresser.Name == "Dresser" or dresser.Name == "DrawerContainer" then
-						local keyObtain = dresser:FindFirstChild("KeyObtain", true)
-						if keyObtain then
-							local hit = keyObtain:FindFirstChild("Hitbox") or keyObtain:FindFirstChild("KeyHitbox") or keyObtain:FindFirstChildWhichIsA("BasePart")
-							if hit then
-								local bill = hit:FindFirstChild("KeyBill")
-								if not bill then
-									bill = Instance.new("BillboardGui")
-									bill.Name = "KeyBill"
-									bill.Size = UDim2.new(0, 80, 0, 30)
-									bill.AlwaysOnTop = true
-									local txt = Instance.new("TextLabel")
-									txt.Size = UDim2.new(1, 0, 1, 0)
-									txt.BackgroundTransparency = 1
-									txt.Text = "KEY"
-									txt.TextColor3 = Color3.fromRGB(255, 255, 0)
-									txt.TextSize = 14
-									txt.Font = Enum.Font.SourceSansBold
-									txt.Parent = bill
-									bill.Parent = hit
-								end
-							end
-						end
-					end
-				end
-			end
-		end
-	end
-end)
+-- 5. Lever For Gate ESP
+local leverESPEnabled = false
+CreateToggle("Lever For Gate ESP", function(state) leverESPEnabled = state end)
 
--- 5. Custom Speed & Anti-Teleport
+-- 6. Custom Speed & Anti-Teleport
 local customSpeed = 16
 local speedEnabled = false
 local antiTpEnabled = false
@@ -331,88 +259,19 @@ CreateToggle("Enable Custom Speed", function(state) speedEnabled = state end)
 CreateSlider("Speed Value", 16, 40, 16, function(val) customSpeed = val end)
 CreateToggle("Anti-Teleport / Safe Speed", function(state) antiTpEnabled = state end)
 
-local lastPosition = Vector3.new()
-RunService.Stepped:Connect(function()
-	if speedEnabled and Humanoid and HumanoidRootPart then
-		Humanoid.WalkSpeed = customSpeed
-		if antiTpEnabled then
-			if (HumanoidRootPart.Position - lastPosition).Magnitude > 50 and not workspace:GetAttribute("InElevator") then
-				HumanoidRootPart.CFrame = CFrame.new(lastPosition)
-			else
-				lastPosition = HumanoidRootPart.Position
-			end
-		else
-			lastPosition = HumanoidRootPart.Position
-		end
-	end
-end)
-
--- 6. Eyes Feature (ESP & Anti-Damage)
+-- 7. Eyes Feature (ESP & Anti-Damage)
 local eyesESP = false
 local eyesAntiDamage = false
 CreateToggle("Eyes ESP", function(state) eyesESP = state end)
-CreateToggle("Eyes Anti-Damage (Don't look)", function(state) eyesAntiDamage = state end)
+CreateToggle("Eyes Anti-Damage", function(state) eyesAntiDamage = state end)
 
-RunService.RenderStepped:Connect(function()
-	for _, obj in ipairs(Workspace:GetChildren()) do
-		if obj.Name == "Eyes" then
-			if eyesESP then
-				local p = obj:FindFirstChildWhichIsA("BasePart")
-				if p and not p:FindFirstChild("EyesBill") then
-					local b = Instance.new("BillboardGui", p)
-					b.Name = "EyesBill"
-					b.Size = UDim2.new(0, 80, 0, 30)
-					b.AlwaysOnTop = true
-					local t = Instance.new("TextLabel", b)
-					t.Size = UDim2.new(1, 0, 1, 0)
-					t.BackgroundTransparency = 1
-					t.Text = "EYES"
-					t.TextColor3 = Color3.fromRGB(150, 0, 255)
-					t.Font = Enum.Font.SourceSansBold
-					t.TextSize = 14
-				end
-			end
-			if eyesAntiDamage and HumanoidRootPart then
-				-- Point camera away from eyes or disable detection components
-				local direct = obj:FindFirstChild("Hitbox") or obj:FindFirstChildWhichIsA("BasePart")
-				if direct then
-					-- Safely pivot character view away
-					local cf = CFrame.new(HumanoidRootPart.Position, Vector3.new(HumanoidRootPart.Position.X, HumanoidRootPart.Position.Y, HumanoidRootPart.Position.Z + 10))
-					workspace.CurrentCamera.CFrame = cf
-				end
-			end
-		end
-	end
-end)
-
--- 7. Screech Handler
+-- 8. Screech Handler
 local screechAutoTurn = false
 local screechNotif = false
 CreateToggle("Screech Notifications", function(state) screechNotif = state end)
 CreateToggle("Screech Auto-Turn Camera", function(state) screechAutoTurn = state end)
 
-RunService.RenderStepped:Connect(function()
-	local entities = ReplicatedStorage:FindFirstChild("Entities")
-	if not entities then return end
-	for _, name in ipairs({"Screech", "ScreechRetro", "ScreechRushMode"}) do
-		-- Check in workspace if spawned
-		local activeScreech = Workspace:FindFirstChild(name)
-		if activeScreech then
-			if screechNotif and not activeScreech:GetAttribute("Notified") then
-				activeScreech:SetAttribute("Notified", true)
-				SendNotification("SCREECH!", "Screech has appeared!")
-			end
-			if screechAutoTurn and HumanoidRootPart then
-				local p = activeScreech:FindFirstChildWhichIsA("BasePart")
-				if p then
-					workspace.CurrentCamera.CFrame = CFrame.new(workspace.CurrentCamera.CFrame.Position, p.Position)
-				end
-			end
-		end
-	end
-end)
-
--- 8. Figure ESP & Bypass/Avoidance (Room 50)
+-- 9. Figure ESP & Bypass/Avoidance
 local figureESP = false
 local figureAvoid = false
 local avoidRadius = 15
@@ -420,33 +279,118 @@ CreateToggle("Figure ESP", function(state) figureESP = state end)
 CreateToggle("Figure Avoidance", function(state) figureAvoid = state end)
 CreateSlider("Figure Avoid Radius", 10, 40, 15, function(val) avoidRadius = val end)
 
+-- 10. Room 50 Books ESP
+local booksESP = false
+CreateToggle("Room 50 Books ESP", function(state) booksESP = state end)
+
+-- 11. Snares ESP (90-99)
+local snareESP = false
+CreateToggle("Snares ESP (90-99)", function(state) snareESP = state end)
+
+-- 12. Room 100 Breaker Poles ESP
+local polesESP = false
+CreateToggle("Room 100 Breaker Poles ESP", function(state) polesESP = state end)
+
+
+--// MAIN ENGINE TICK LOOP //--
+local notifiedRush = {}
+
 RunService.RenderStepped:Connect(function()
 	local currentRooms = Workspace:FindFirstChild("CurrentRooms")
-	if not currentRooms then return end
-	for _, room in ipairs(currentRooms:GetChildren()) do
-		local figSetup = room:FindFirstChild("FigureSetup") or room:FindFirstChild("FigureRig", true)
-		if figSetup then
-			local rig = room:FindFirstChild("FigureRig", true) or figSetup
+	
+	-- Doors & Room-based Items Loop
+	if currentRooms then
+		for _, room in ipairs(currentRooms:GetChildren()) do
+			-- 1. Doors ESP (Correct & Dupe)
+			if doorsESPEnabled then
+				local door = room:FindFirstChild("Door", true)
+				if door then
+					local isDupe = door:FindFirstChild("dupeDoor") or door.Name == "dupeDoor"
+					if isDupe then
+						CreateOrUpdateESP(door, "DoorsESP", "DUPE DOOR", Color3.fromRGB(255, 0, 0))
+					else
+						CreateOrUpdateESP(door, "DoorsESP", "CORRECT DOOR", Color3.fromRGB(0, 255, 0))
+					end
+				end
+			end
+			
+			-- 5. Lever For Gate ESP
+			if leverESPEnabled then
+				local assets = room:FindFirstChild("Assets")
+				if assets then
+					for _, item in ipairs(assets:GetDescendants()) do
+						if item.Name == "LeverForGate" then
+							CreateOrUpdateESP(item, "LeverESP", "LEVER", Color3.fromRGB(255, 255, 0))
+						end
+					end
+				end
+			end
+			
+			-- 4. Key ESP
+			if keyESPEnabled then
+				local assets = room:FindFirstChild("Assets")
+				if assets then
+					for _, dresser in ipairs(assets:GetDescendants()) do
+						if dresser.Name == "Dresser" or dresser.Name == "DrawerContainer" then
+							local keyObtain = dresser:FindFirstChild("KeyObtain", true)
+							if keyObtain then
+								local hit = keyObtain:FindFirstChild("Hitbox") or keyObtain:FindFirstChild("KeyHitbox") or keyObtain
+								CreateOrUpdateESP(hit, "KeyESP", "KEY", Color3.fromRGB(255, 255, 0))
+							end
+						end
+					end
+				end
+			end
+			
+			-- 9. Room 50 Books ESP
+			if booksESP then
+				local assets = room:FindFirstChild("Assets")
+				if assets then
+					for _, shelf in ipairs(assets:GetDescendants()) do
+						if shelf.Name == "Modular_Bookshelf" then
+							local liveBook = shelf:FindFirstChild("LiveHintBook", true)
+							if liveBook then
+								CreateOrUpdateESP(liveBook, "BookESP", "BOOK", Color3.fromRGB(0, 255, 255))
+							end
+						end
+					end
+				end
+			end
+			
+			-- 11. Snares ESP (90-99)
+			if snareESP then
+				local assets = room:FindFirstChild("Assets")
+				if assets then
+					for _, snareModel in ipairs(assets:GetDescendants()) do
+						if snareModel.Name == "Snare" then
+							local base = snareModel:FindFirstChild("SnareBase") or snareModel
+							CreateOrUpdateESP(base, "SnareESP", "TRAP", Color3.fromRGB(255, 128, 0))
+						end
+					end
+				end
+			end
+			
+			-- 12. Room 100 Breaker Poles ESP
+			if polesESP then
+				for _, pole in ipairs(room:GetDescendants()) do
+					if pole.Name == "LiveBreakerPolePickup" then
+						CreateOrUpdateESP(pole, "PoleESP", "LEVER", Color3.fromRGB(0, 255, 0))
+					end
+				end
+			end
+			
+			-- 8. Figure ESP & Avoidance
+			local rig = room:FindFirstChild("FigureRig", true) or room:FindFirstChild("FigureSetup", true)
 			if rig then
-				local part = rig:FindFirstChild("HumanoidRootPart") or rig:FindFirstChildWhichIsA("BasePart")
-				if part then
-					if figureESP and not part:FindFirstChild("FigBill") then
-						local b = Instance.new("BillboardGui", part)
-						b.Name = "FigBill"
-						b.Size = UDim2.new(0, 100, 0, 40)
-						b.AlwaysOnTop = true
-						local t = Instance.new("TextLabel", b)
-						t.Size = UDim2.new(1, 0, 1, 0)
-						t.BackgroundTransparency = 1
-						t.Text = "FIGURE"
-						t.TextColor3 = Color3.fromRGB(255, 0, 0)
-						t.Font = Enum.Font.SourceSansBold
-						t.TextSize = 16
+				local primaryPart = rig:FindFirstChild("HumanoidRootPart") or rig:FindFirstChildWhichIsA("BasePart")
+				if primaryPart then
+					if figureESP then
+						CreateOrUpdateESP(primaryPart, "FigureESP", "FIGURE", Color3.fromRGB(255, 0, 0))
 					end
 					if figureAvoid and Humanoid and HumanoidRootPart then
-						local dist = (HumanoidRootPart.Position - part.Position).Magnitude
+						local dist = (HumanoidRootPart.Position - primaryPart.Position).Magnitude
 						if dist < avoidRadius then
-							local dir = (HumanoidRootPart.Position - part.Position).Unit
+							local dir = (HumanoidRootPart.Position - primaryPart.Position).Unit
 							Humanoid:Move(dir * 2)
 						end
 					end
@@ -454,103 +398,64 @@ RunService.RenderStepped:Connect(function()
 			end
 		end
 	end
-end)
-
--- 9. Room 50 Books ESP
-local booksESP = false
-CreateToggle("Room 50 Books ESP", function(state) booksESP = state end)
-
-RunService.RenderStepped:Connect(function()
-	if not booksESP then return end
-	local currentRooms = Workspace:FindFirstChild("CurrentRooms")
-	if not currentRooms then return end
-	for _, room in ipairs(currentRooms:GetChildren()) do
-		local assets = room:FindFirstChild("Assets")
-		if assets then
-			for _, shelf in ipairs(assets:GetDescendants()) do
-				if shelf.Name == "Modular_Bookshelf" then
-					local liveBook = shelf:FindFirstChild("LiveHintBook", true)
-					if liveBook then
-						local p = liveBook:FindFirstChildWhichIsA("BasePart")
-						if p and not p:FindFirstChild("BookBill") then
-							local b = Instance.new("BillboardGui", p)
-							b.Name = "BookBill"
-							b.Size = UDim2.new(0, 80, 0, 30)
-							b.AlwaysOnTop = true
-							local t = Instance.new("TextLabel", b)
-							t.Size = UDim2.new(1, 0, 1, 0)
-							t.BackgroundTransparency = 1
-							t.Text = "BOOK"
-							t.TextColor3 = Color3.fromRGB(0, 255, 255)
-							t.Font = Enum.Font.SourceSansBold
-							t.TextSize = 14
-						end
-					end
+	
+	-- 2. Rush & Ambush ESP + Notifications (Global Workspace scan)
+	for _, obj in ipairs(Workspace:GetChildren()) do
+		if obj.Name == "RushMoving" or obj.Name == "AmbushMoving" then
+			if rushNotifications and not notifiedRush[obj] then
+				notifiedRush[obj] = true
+				SendNotification("WARNING!", obj.Name .. " is incoming!")
+			end
+			if rushAmbushESP then
+				CreateOrUpdateESP(obj, "RushAmbushESP", obj.Name:upper(), Color3.fromRGB(255, 50, 50))
+			end
+		end
+		
+		-- 7. Eyes ESP & Anti-Damage
+		if obj.Name == "Eyes" then
+			if eyesESP then
+				CreateOrUpdateESP(obj, "EyesESP", "EYES", Color3.fromRGB(150, 0, 255))
+			end
+			if eyesAntiDamage and HumanoidRootPart then
+				local direct = obj:FindFirstChild("Hitbox") or obj:FindFirstChildWhichIsA("BasePart")
+				if direct then
+					Camera.CFrame = CFrame.new(Camera.CFrame.Position, Vector3.new(Camera.CFrame.Position.X, Camera.CFrame.Position.Y - 10, Camera.CFrame.Position.Z + 10))
+				end
+			end
+		end
+	end
+	
+	-- 8. Screech Global Handler
+	for _, entityName in ipairs({"Screech", "ScreechRetro", "ScreechRushMode"}) do
+		local screech = Workspace:FindFirstChild(entityName, true)
+		if screech then
+			if screechNotif and not screech:GetAttribute("Notified") then
+				screech:SetAttribute("Notified", true)
+				SendNotification("SCREECH!", "Screech has appeared!")
+			end
+			if screechAutoTurn then
+				local part = screech:FindFirstChild("HumanoidRootPart") or screech:FindFirstChildWhichIsA("BasePart")
+				if part then
+					Camera.CFrame = CFrame.new(Camera.CFrame.Position, part.Position)
 				end
 			end
 		end
 	end
 end)
 
--- 10. Snares ESP (Rooms 90-99)
-local snareESP = false
-CreateToggle("Snares ESP (90-99)", function(state) snareESP = state end)
-
-RunService.RenderStepped:Connect(function()
-	if not snareESP then return end
-	local currentRooms = Workspace:FindFirstChild("CurrentRooms")
-	if not currentRooms then return end
-	for _, room in ipairs(currentRooms:GetChildren()) do
-		local assets = room:FindFirstChild("Assets")
-		if assets then
-			for _, snareModel in ipairs(assets:GetDescendants()) do
-				if snareModel.Name == "Snare" then
-					local base = snareModel:FindFirstChild("SnareBase") or snareModel:FindFirstChildWhichIsA("BasePart")
-					if base and not base:FindFirstChild("SnareBill") then
-						local b = Instance.new("BillboardGui", base)
-						b.Name = "SnareBill"
-						b.Size = UDim2.new(0, 80, 0, 30)
-						b.AlwaysOnTop = true
-						local t = Instance.new("TextLabel", b)
-						t.Size = UDim2.new(1, 0, 1, 0)
-						t.BackgroundTransparency = 1
-						t.Text = "TRAP"
-						t.TextColor3 = Color3.fromRGB(255, 128, 0)
-						t.Font = Enum.Font.SourceSansBold
-						t.TextSize = 14
-					end
-				end
+-- 6. Speed & Anti-Teleport Loop
+local lastPosition = Vector3.new()
+RunService.Stepped:Connect(function()
+	if speedEnabled and Humanoid and HumanoidRootPart then
+		Humanoid.WalkSpeed = customSpeed
+		if antiTpEnabled then
+			if (HumanoidRootPart.Position - lastPosition).Magnitude > 50 and not Workspace:GetAttribute("InElevator") then
+				HumanoidRootPart.CFrame = CFrame.new(lastPosition)
+			else
+				lastPosition = HumanoidRootPart.Position
 			end
-		end
-	end
-end)
-
--- 11. Room 100 Breaker Poles ESP
-local polesESP = false
-CreateToggle("Room 100 Breaker Poles ESP", function(state) polesESP = state end)
-
-RunService.RenderStepped:Connect(function()
-	if not polesESP then return end
-	local currentRooms = Workspace:FindFirstChild("CurrentRooms")
-	if not currentRooms then return end
-	for _, room in ipairs(currentRooms:GetChildren()) do
-		for _, pole in ipairs(room:GetDescendants()) do
-			if pole.Name == "LiveBreakerPolePickup" then
-				local p = pole:FindFirstChildWhichIsA("BasePart")
-				if p and not p:FindFirstChild("PoleBill") then
-					local b = Instance.new("BillboardGui", p)
-					b.Name = "PoleBill"
-					b.Size = UDim2.new(0, 80, 0, 30)
-					b.AlwaysOnTop = true
-					local t = Instance.new("TextLabel", b)
-					t.Size = UDim2.new(1, 0, 1, 0)
-					t.BackgroundTransparency = 1
-					t.Text = "LEVER"
-					t.TextColor3 = Color3.fromRGB(0, 255, 0)
-					t.Font = Enum.Font.SourceSansBold
-					t.TextSize = 14
-				end
-			end
+		else
+			lastPosition = HumanoidRootPart.Position
 		end
 	end
 end)
