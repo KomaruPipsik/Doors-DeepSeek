@@ -1,4 +1,4 @@
---// DOORS SCRIPT (FULL VERSION & FIXED ESP + RUSH/AMBUSH)
+--// DOORS SCRIPT - FULL OPTIMIZED & FIXED VERSION
 --// Services
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -6,7 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local CoreGui = game:GetService("CoreGui")
 local UserInputService = game:GetService("UserInputService")
-local TweenService = game:GetService("TweenService")
+local Lighting = game:GetService("Lighting")
 local StarterGui = game:GetService("StarterGui")
 
 local Player = Players.LocalPlayer
@@ -94,32 +94,37 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	end
 end)
 
---// Universal Helper to create Billboard ESP
+--// Universal Helper to create Billboard ESP (Optimized Cache)
+local espCache = {}
 local function CreateOrUpdateESP(parent, nameTag, textStr, textColor)
 	if not parent then return end
 	local targetPart = parent:IsA("BasePart") and parent or parent:FindFirstChildWhichIsA("BasePart")
 	if not targetPart then return end
 	
-	local bill = targetPart:FindFirstChild(nameTag)
-	if not bill then
-		bill = Instance.new("BillboardGui")
-		bill.Name = nameTag
-		bill.Size = UDim2.new(0, 110, 0, 45)
-		bill.AlwaysOnTop = true
-		bill.StudsOffset = Vector3.new(0, 2.5, 0)
-		
-		local txt = Instance.new("TextLabel")
-		txt.Name = "Text"
-		txt.Size = UDim2.new(1, 0, 1, 0)
-		txt.BackgroundTransparency = 1
-		txt.Text = textStr
-		txt.TextColor3 = textColor
-		txt.TextStrokeTransparency = 0
-		txt.TextSize = 15
-		txt.Font = Enum.Font.SourceSansBold
-		txt.Parent = bill
-		
-		bill.Parent = targetPart
+	local bill = espCache[targetPart]
+	if not bill or not bill.Parent then
+		bill = targetPart:FindFirstChild(nameTag)
+		if not bill then
+			bill = Instance.new("BillboardGui")
+			bill.Name = nameTag
+			bill.Size = UDim2.new(0, 110, 0, 45)
+			bill.AlwaysOnTop = true
+			bill.StudsOffset = Vector3.new(0, 2.5, 0)
+			
+			local txt = Instance.new("TextLabel")
+			txt.Name = "Text"
+			txt.Size = UDim2.new(1, 0, 1, 0)
+			txt.BackgroundTransparency = 1
+			txt.Text = textStr
+			txt.TextColor3 = textColor
+			txt.TextStrokeTransparency = 0
+			txt.TextSize = 15
+			txt.Font = Enum.Font.SourceSansBold
+			txt.Parent = bill
+			
+			bill.Parent = targetPart
+		end
+		espCache[targetPart] = bill
 	end
 end
 
@@ -217,41 +222,54 @@ local function CreateSlider(name, min, max, default, callback)
 	end)
 end
 
---// FEATURES IMPLEMENTATION //--
-
--- 1. Correct & Dupe Doors ESP
+--// FEATURES TOGGLES //--
 local doorsESPEnabled = false
 CreateToggle("Doors ESP (Correct & Dupe)", function(state) doorsESPEnabled = state end)
 
--- 2. Rush & Ambush ESP + Notifications
 local rushAmbushESP = false
 local rushNotifications = false
 CreateToggle("Rush & Ambush ESP", function(state) rushAmbushESP = state end)
 CreateToggle("Rush & Ambush Notifications", function(state) rushNotifications = state end)
 
--- 3. Full Bright
 local fullBrightEnabled = false
 CreateToggle("Full Bright", function(state)
 	fullBrightEnabled = state
 	if state then
-		game.Lighting.Brightness = 2
-		game.Lighting.ClockTime = 14
-		game.Lighting.GlobalShadows = false
-		game.Lighting.OutdoorAmbient = Color3.fromRGB(255, 255, 255)
+		Lighting.Brightness = 2
+		Lighting.ClockTime = 14
+		Lighting.GlobalShadows = false
+		Lighting.OutdoorAmbient = Color3.fromRGB(255, 255, 255)
 	else
-		game.Lighting.GlobalShadows = true
+		Lighting.GlobalShadows = true
 	end
 end)
 
--- 4. Key ESP
+-- Boost FPS Feature
+local boostFpsEnabled = false
+CreateToggle("Boost FPS", function(state)
+	boostFpsEnabled = state
+	if state then
+		for _, v in ipairs(Workspace:GetDescendants()) do
+			if v:IsA("BasePart") then
+				v.Material = Enum.Material.SmoothPlastic
+				v.Reflectance = 0
+			elseif v:IsA("Decal") or v:IsA("Texture") then
+				v.Transparency = 1
+			end
+		end
+		Lighting.GlobalShadows = false
+		Lighting.FogEnd = 999999
+	else
+		Lighting.GlobalShadows = true
+	end
+end)
+
 local keyESPEnabled = false
 CreateToggle("Key ESP", function(state) keyESPEnabled = state end)
 
--- 5. Lever For Gate ESP
 local leverESPEnabled = false
 CreateToggle("Lever For Gate ESP", function(state) leverESPEnabled = state end)
 
--- 6. Custom Speed & Anti-Teleport
 local customSpeed = 16
 local speedEnabled = false
 local antiTpEnabled = false
@@ -259,62 +277,72 @@ CreateToggle("Enable Custom Speed", function(state) speedEnabled = state end)
 CreateSlider("Speed Value", 16, 40, 16, function(val) customSpeed = val end)
 CreateToggle("Anti-Teleport / Safe Speed", function(state) antiTpEnabled = state end)
 
--- 7. Eyes Feature (ESP & Anti-Damage)
 local eyesESP = false
 local eyesAntiDamage = false
 CreateToggle("Eyes ESP", function(state) eyesESP = state end)
-CreateToggle("Eyes Anti-Damage", function(state) eyesAntiDamage = state end)
+CreateToggle("Eyes Anti-Damage (Smart)", function(state) eyesAntiDamage = state end)
 
--- 8. Screech Handler
 local screechAutoTurn = false
 local screechNotif = false
 CreateToggle("Screech Notifications", function(state) screechNotif = state end)
 CreateToggle("Screech Auto-Turn Camera", function(state) screechAutoTurn = state end)
 
--- 9. Figure ESP & Bypass/Avoidance
 local figureESP = false
 local figureAvoid = false
 local avoidRadius = 15
 CreateToggle("Figure ESP", function(state) figureESP = state end)
-CreateToggle("Figure Avoidance", function(state) figureAvoid = state end)
+CreateToggle("Figure Avoidance (Smart Height)", function(state) figureAvoid = state end)
 CreateSlider("Figure Avoid Radius", 10, 40, 15, function(val) avoidRadius = val end)
 
--- 10. Room 50 Books ESP
 local booksESP = false
 CreateToggle("Room 50 Books ESP", function(state) booksESP = state end)
 
--- 11. Snares ESP (90-99)
 local snareESP = false
 CreateToggle("Snares ESP (90-99)", function(state) snareESP = state end)
 
--- 12. Room 100 Breaker Poles ESP
 local polesESP = false
 CreateToggle("Room 100 Breaker Poles ESP", function(state) polesESP = state end)
 
 
---// MAIN ENGINE TICK LOOP //--
+--// OPTIMIZED THROTTLED ENGINE LOOP (Runs every 0.2 seconds instead of every frame to eliminate lags)
 local notifiedRush = {}
+local clockTimer = 0
 
-RunService.RenderStepped:Connect(function()
+RunService.RenderStepped:Connect(function(dt)
+	clockTimer = clockTimer + dt
+	if clockTimer < 0.2 then return end
+	clockTimer = 0
+
 	local currentRooms = Workspace:FindFirstChild("CurrentRooms")
 	
-	-- Doors & Room-based Items Loop
+	-- Global Check for Dangerous Entities (Rush, Ambush, Screech) to safely disable Eyes anti-damage
+	local dangerActive = false
+	for _, obj in ipairs(Workspace:GetChildren()) do
+		if obj.Name == "RushMoving" or obj.Name == "AmbushMoving" or obj.Name == "Eyes" then
+			dangerActive = true
+			break
+		end
+	end
+	for _, name in ipairs({"Screech", "ScreechRetro", "ScreechRushMode"}) do
+		if Workspace:FindFirstChild(name, true) then
+			dangerActive = true
+			break
+		end
+	end
+
+	-- Rooms Scanning
 	if currentRooms then
 		for _, room in ipairs(currentRooms:GetChildren()) do
-			-- 1. Doors ESP (Correct & Dupe)
+			-- 1. Doors ESP
 			if doorsESPEnabled then
 				local door = room:FindFirstChild("Door", true)
 				if door then
 					local isDupe = door:FindFirstChild("dupeDoor") or door.Name == "dupeDoor"
-					if isDupe then
-						CreateOrUpdateESP(door, "DoorsESP", "DUPE DOOR", Color3.fromRGB(255, 0, 0))
-					else
-						CreateOrUpdateESP(door, "DoorsESP", "CORRECT DOOR", Color3.fromRGB(0, 255, 0))
-					end
+					CreateOrUpdateESP(door, "DoorsESP", isDupe and "DUPE DOOR" or "CORRECT DOOR", isDupe and Color3.fromRGB(255, 0, 0) or Color3.fromRGB(0, 255, 0))
 				end
 			end
 			
-			-- 5. Lever For Gate ESP
+			-- 2. Lever ESP
 			if leverESPEnabled then
 				local assets = room:FindFirstChild("Assets")
 				if assets then
@@ -326,7 +354,7 @@ RunService.RenderStepped:Connect(function()
 				end
 			end
 			
-			-- 4. Key ESP
+			-- 3. Key ESP
 			if keyESPEnabled then
 				local assets = room:FindFirstChild("Assets")
 				if assets then
@@ -342,7 +370,7 @@ RunService.RenderStepped:Connect(function()
 				end
 			end
 			
-			-- 9. Room 50 Books ESP
+			-- 4. Room 50 Books ESP
 			if booksESP then
 				local assets = room:FindFirstChild("Assets")
 				if assets then
@@ -357,7 +385,7 @@ RunService.RenderStepped:Connect(function()
 				end
 			end
 			
-			-- 11. Snares ESP (90-99)
+			-- 5. Snares ESP (90-99)
 			if snareESP then
 				local assets = room:FindFirstChild("Assets")
 				if assets then
@@ -370,7 +398,7 @@ RunService.RenderStepped:Connect(function()
 				end
 			end
 			
-			-- 12. Room 100 Breaker Poles ESP
+			-- 6. Room 100 Breaker Poles ESP
 			if polesESP then
 				for _, pole in ipairs(room:GetDescendants()) do
 					if pole.Name == "LiveBreakerPolePickup" then
@@ -379,7 +407,7 @@ RunService.RenderStepped:Connect(function()
 				end
 			end
 			
-			-- 8. Figure ESP & Avoidance
+			-- 7. Figure ESP & Smart Avoidance (Height/Climb Check if cornered)
 			local rig = room:FindFirstChild("FigureRig", true) or room:FindFirstChild("FigureSetup", true)
 			if rig then
 				local primaryPart = rig:FindFirstChild("HumanoidRootPart") or rig:FindFirstChildWhichIsA("BasePart")
@@ -390,8 +418,19 @@ RunService.RenderStepped:Connect(function()
 					if figureAvoid and Humanoid and HumanoidRootPart then
 						local dist = (HumanoidRootPart.Position - primaryPart.Position).Magnitude
 						if dist < avoidRadius then
-							local dir = (HumanoidRootPart.Position - primaryPart.Position).Unit
-							Humanoid:Move(dir * 2)
+							-- Check if player is stuck/colliding against a wall (dead end) by checking velocity movement drop
+							local raycastParams = RaycastParams.new()
+							raycastParams.FilterType = RaycastFilterType.Exclude
+							raycastParams.FilterDescendantsInstances = {Character}
+							
+							local hitForward = Workspace:Raycast(HumanoidRootPart.Position, HumanoidRootPart.CConsole or (HumanoidRootPart.CFrame.LookVector * 4), raycastParams)
+							if hitForward or Humanoid.MoveDirection.Magnitude < 0.1 then
+								-- Dead end / Cornered: Jump/Elevate upward so Figure cannot reach you!
+								Humanoid.Jump = true
+							else
+								local dir = (HumanoidRootPart.Position - primaryPart.Position).Unit
+								Humanoid:Move(dir * 2)
+							end
 						end
 					end
 				end
@@ -399,7 +438,7 @@ RunService.RenderStepped:Connect(function()
 		end
 	end
 	
-	-- 2. Rush & Ambush ESP + Notifications (Global Workspace scan)
+	-- Global Entities (Rush & Ambush)
 	for _, obj in ipairs(Workspace:GetChildren()) do
 		if obj.Name == "RushMoving" or obj.Name == "AmbushMoving" then
 			if rushNotifications and not notifiedRush[obj] then
@@ -411,21 +450,18 @@ RunService.RenderStepped:Connect(function()
 			end
 		end
 		
-		-- 7. Eyes ESP & Anti-Damage
+		-- Eyes ESP & Smart Anti-Damage (Turns off automatically if Rush/Ambush/Screech are active)
 		if obj.Name == "Eyes" then
 			if eyesESP then
 				CreateOrUpdateESP(obj, "EyesESP", "EYES", Color3.fromRGB(150, 0, 255))
 			end
-			if eyesAntiDamage and HumanoidRootPart then
-				local direct = obj:FindFirstChild("Hitbox") or obj:FindFirstChildWhichIsA("BasePart")
-				if direct then
-					Camera.CFrame = CFrame.new(Camera.CFrame.Position, Vector3.new(Camera.CFrame.Position.X, Camera.CFrame.Position.Y - 10, Camera.CFrame.Position.Z + 10))
-				end
+			if eyesAntiDamage and not dangerActive and HumanoidRootPart then
+				Camera.CFrame = CFrame.new(Camera.CFrame.Position, Vector3.new(Camera.CFrame.Position.X, Camera.CFrame.Position.Y - 10, Camera.CFrame.Position.Z + 10))
 			end
 		end
 	end
 	
-	-- 8. Screech Global Handler
+	-- Screech Global Handler
 	for _, entityName in ipairs({"Screech", "ScreechRetro", "ScreechRushMode"}) do
 		local screech = Workspace:FindFirstChild(entityName, true)
 		if screech then
@@ -443,7 +479,7 @@ RunService.RenderStepped:Connect(function()
 	end
 end)
 
--- 6. Speed & Anti-Teleport Loop
+-- Speed & Anti-Teleport Loop
 local lastPosition = Vector3.new()
 RunService.Stepped:Connect(function()
 	if speedEnabled and Humanoid and HumanoidRootPart then
@@ -460,4 +496,4 @@ RunService.Stepped:Connect(function()
 	end
 end)
 
-SendNotification("Doors Script Loaded", "Press RightShift to open/close menu.")
+SendNotification("Doors Script Loaded", "Optimized version ready. Press RightShift to toggle menu.")
