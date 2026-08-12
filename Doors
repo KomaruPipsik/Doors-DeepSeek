@@ -1,0 +1,349 @@
+-- Запуск только после полной загрузки игры
+if not game:IsLoaded() then game.Loaded:Wait() end
+
+-- Основные сервисы Roblox
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local Lighting = game:GetService("Lighting")
+local StarterGui = game:GetService("StarterGui")
+local CoreGui = game:GetService("CoreGui")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+
+-- Конфигурация скрипта
+local Config = {
+    ESP = {
+        DupeDoorColor = Color3.fromRGB(255, 0, 0),
+        KeyColor = Color3.fromRGB(0, 255, 0),
+        SnareColor = Color3.fromRGB(255, 165, 0),
+        BreakerColor = Color3.fromRGB(0, 255, 255),
+        BookColor = Color3.fromRGB(255, 0, 255),
+        FigureColor = Color3.fromRGB(255, 50, 50)
+    },
+    FigureSafeRadius = 45, -- Дистанция предупреждения о Фигуре
+    CustomWalkSpeed = 21, -- Скорость (стандарт 16)
+    EnableFPSBooster = true,
+    EnableFullBright = true
+}
+
+-- Глобальное хранилище для очистки при необходимости
+local HighlightContainer = Instance.new("Folder")
+HighlightContainer.Name = "DoorsESPContainer"
+-- Прячем в CoreGui если возможно, иначе в PlayerGui
+local successContainer = pcall(function() HighlightContainer.Parent = CoreGui end)
+if not successContainer then HighlightContainer.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+
+-- ==========================================
+-- 1. УТИЛИТЫ И БАЗОВЫЕ ФУНКЦИИ
+-- ==========================================
+local Utils = {}
+
+function Utils.Notify(title, text)
+    pcall(function()
+        StarterGui:SetCore("SendNotification", {
+            Title = title,
+            Text = text,
+            Duration = 4
+        })
+    end)
+end
+
+function Utils.CreateESP(instance, color, name)
+    if not instance or not instance:IsA("Instance") then return end
+    
+    -- Проверка на дубликат
+    for _, child in ipairs(HighlightContainer:GetChildren()) do
+        if child:GetAttribute("Target") == instance:GetFullName() then return end
+    end
+
+    local highlight = Instance.new("Highlight")
+    highlight.Adornee = instance
+    highlight.FillColor = color
+    highlight.OutlineColor = Color3.new(1, 1, 1)
+    highlight.FillTransparency = 0.5
+    highlight.OutlineTransparency = 0
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.Name = name or "ESP"
+    highlight:SetAttribute("Target", instance:GetFullName())
+    highlight.Parent = HighlightContainer
+    
+    -- Автоматическое удаление ESP, если объект уничтожен
+    local conn
+    conn = instance.AncestryChanged:Connect(function(_, parent)
+        if not parent then
+            highlight:Destroy()
+            conn:Disconnect()
+        end
+    end)
+end
+
+function Utils.FindAnyChild(parent, namesTable)
+    if not parent then return nil end
+    for _, name in ipairs(namesTable) do
+        local child = parent:FindFirstChild(name)
+        if child then return child end
+    end
+    return nil
+end
+
+-- ==========================================
+-- 2. СЕРВИС МЕНЕДЖМЕНТА КОМНАТ И ПРЕДМЕТОВ
+-- ==========================================
+local RoomService = {}
+
+function RoomService.ScanRoom(room)
+    if not room or not room:IsA("Model") then return end
+
+    local assets = room:FindFirstChild("Assets")
+    if not assets then return end
+
+    -- 2.1. Поиск ложных дверей (DupeDoor)
+    for _, door in ipairs(room:GetChildren()) do
+        if door.Name == "Door" or door.Name == "Light" then
+            local dupe = door:FindFirstChild("door") or door:FindFirstChild("DupeDoor")
+            if dupe and door:GetAttribute("Hidden") == true then
+                Utils.CreateESP(door, Config.ESP.DupeDoorColor, "DupeDoor")
+            end
+        end
+    end
+
+    -- 2.2. Поиск Ключей
+    local dresser = assets:FindFirstChild("Dresser")
+    if dresser then
+        for _, desc in ipairs(dresser:GetDescendants()) do
+            if desc.Name == "KeyObtain" or desc.Name == "KeyObtaln" then
+                local hitbox = Utils.FindAnyChild(desc, {"Hitbox", "Hltbox"})
+                if hitbox then
+                    local keyPart = Utils.FindAnyChild(hitbox, {"KeyHitbox", "KeyNitbox"})
+                    if keyPart then Utils.CreateESP(keyPart, Config.ESP.KeyColor, "Key") end
+                end
+            end
+        end
+    end
+
+    -- 2.3. Поиск Капканов (Комнаты 90-99)
+    local snare = assets:FindFirstChild("Snare")
+    if snare then
+        for _, desc in ipairs(snare:GetDescendants()) do
+            if desc.Name == "SnareBase" and desc:IsA("BasePart") then
+                Utils.CreateESP(desc, Config.ESP.SnareColor, "Snare")
+            end
+        end
+    end
+
+    -- 2.4. Поиск Рубильников (Комната 100)
+    for _, desc in ipairs(room:GetDescendants()) do
+        if desc.Name == "LiveBreakerPolePickup" or desc.Name == "LiveBreakerPolePlckup" then
+            Utils.CreateESP(desc, Config.ESP.BreakerColor, "Breaker")
+        end
+    end
+
+    -- 2.5. Комната 50: Книги-подсказки
+    local bookshelves = Utils.FindAnyChild(assets, {"Bookshelves", "Bookshelvesl"})
+    if bookshelves then
+        for _, desc in ipairs(bookshelves:GetDescendants()) do
+            if desc.Name == "LiveHintBook" then
+                Utils.CreateESP(desc, Config.ESP.BookColor, "Book")
+            end
+        end
+    end
+
+    -- 2.6. Комната 50: Фигура
+    local figureSetup = Utils.FindAnyChild(room, {"FigureSetup", "FlgureSetup"})
+    if figureSetup then
+        local figureRig = figureSetup:FindFirstChild("FigureRig")
+        if figureRig then
+            Utils.CreateESP(figureRig, Config.ESP.FigureColor, "Figure")
+            RoomService.TrackFigure(figureRig)
+        end
+    end
+end
+
+function RoomService.TrackFigure(figure)
+    RunService.Heartbeat:Connect(function()
+        if figure and figure.Parent and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+            local root = LocalPlayer.Character.HumanoidRootPart
+            local figureRoot = figure:FindFirstChild("HumanoidRootPart")
+            if figureRoot then
+                local dist = (root.Position - figureRoot.Position).Magnitude
+                if dist <= Config.FigureSafeRadius then
+                    -- Мягкое уведомление/логика избежания (пока только визуальный контроль расстояния)
+                    -- Чтобы не спамить в чат, оставляем проверку тихой, но ESP работает
+                end
+            end
+        end
+    end)
+end
+
+function RoomService.Initialize()
+    local currentRooms = Workspace:WaitForChild("CurrentRooms", 10)
+    if currentRooms then
+        -- Сканирование уже существующих комнат
+        for _, room in ipairs(currentRooms:GetChildren()) do
+            task.spawn(RoomService.ScanRoom, room)
+        end
+        -- Прослушивание новых
+        currentRooms.ChildAdded:Connect(function(room)
+            task.wait(0.5) -- Ждем генерацию ассетов
+            task.spawn(RoomService.ScanRoom, room)
+        end)
+    end
+end
+
+-- ==========================================
+-- 3. СЕРВИС МОНИТОРИНГА СУЩНОСТЕЙ (Entities)
+-- ==========================================
+local EntityService = {}
+
+function EntityService.HandleCameraAversion(eyesModel)
+    local connection
+    connection = RunService.RenderStepped:Connect(function()
+        if not eyesModel or not eyesModel.Parent then 
+            connection:Disconnect() 
+            return 
+        end
+        
+        local core = eyesModel:FindFirstChild("Core") or eyesModel.PrimaryPart
+        if not core then return end
+
+        local camCFrame = Camera.CFrame
+        local lookVector = camCFrame.LookVector
+        local directionToEyes = (core.Position - camCFrame.Position).Unit
+        local dotProduct = lookVector:Dot(directionToEyes)
+
+        -- Если игрок смотрит на Eyes (угол обзора)
+        if dotProduct > 0.45 then
+            -- Плавно отворачиваем камеру вниз
+            Camera.CFrame = Camera.CFrame:Lerp(CFrame.new(camCFrame.Position, camCFrame.Position + Vector3.new(lookVector.X, -1, lookVector.Z)), 0.2)
+        end
+    end)
+end
+
+function EntityService.HandleScreech(screech)
+    Utils.Notify("Угроза", "Обнаружен Screech! Камера наведена.")
+    local connection
+    connection = RunService.RenderStepped:Connect(function()
+        if not screech or not screech.Parent then
+            connection:Disconnect()
+            return
+        end
+        
+        local root = screech:FindFirstChild("HumanoidRootPart") or screech.PrimaryPart
+        if root then
+            -- Мгновенно поворачиваем камеру на скрича
+            Camera.CFrame = CFrame.lookAt(Camera.CFrame.Position, root.Position)
+        end
+    end)
+end
+
+function EntityService.Initialize()
+    Workspace.ChildAdded:Connect(function(child)
+        -- Rush и Ambush
+        if child.Name == "RushMoving" or child.Name == "AmbushMoving" then
+            Utils.Notify("ВНИМАНИЕ", child.Name .. " приближается! Прячьтесь!")
+        
+        -- Eyes
+        elseif child.Name == "Eyes" then
+            Utils.Notify("Угроза", "Eyes появился! Отводим взгляд.")
+            EntityService.HandleCameraAversion(child)
+            
+        -- Screech
+        elseif child.Name == "Screech" or child.Name == "ScreechRetro" or child.Name == "ScreechRushMode" then
+            EntityService.HandleScreech(child)
+        end
+    end)
+end
+
+-- ==========================================
+-- 4. ИГРОВОЙ ПРОЦЕСС И ПРОИЗВОДИТЕЛЬНОСТЬ
+-- ==========================================
+local PlayerService = {}
+
+function PlayerService.SetupAntiRubberband()
+    -- Кастомная реализация WalkSpeed без изменения свойства Humanoid.WalkSpeed 
+    -- для обхода серверных проверок. Мы интерполируем CFrame персонажа на клиенте.
+    RunService.Heartbeat:Connect(function(deltaTime)
+        local character = LocalPlayer.Character
+        if not character then return end
+        
+        local humanoid = character:FindFirstChild("Humanoid")
+        local rootPart = character:FindFirstChild("HumanoidRootPart")
+        
+        if humanoid and rootPart and humanoid.Health > 0 then
+            -- Если игрок двигается
+            if humanoid.MoveDirection.Magnitude > 0 then
+                -- Вычисляем разницу между стандартной скоростью и желаемой
+                local speedDiff = Config.CustomWalkSpeed - humanoid.WalkSpeed
+                if speedDiff > 0 then
+                    -- Рассчитываем дополнительное смещение
+                    local moveOffset = humanoid.MoveDirection * (speedDiff * deltaTime)
+                    -- Безопасное изменение CFrame с учетом физики
+                    rootPart.CFrame = rootPart.CFrame + moveOffset
+                end
+            end
+        end
+    end)
+end
+
+function PlayerService.SetupFullBright()
+    if not Config.EnableFullBright then return end
+    
+    local function applyBright()
+        Lighting.Ambient = Color3.new(1, 1, 1)
+        Lighting.ColorShift_Bottom = Color3.new(1, 1, 1)
+        Lighting.ColorShift_Top = Color3.new(1, 1, 1)
+        Lighting.GlobalShadows = false
+        Lighting.FogEnd = 100000
+    end
+
+    applyBright()
+    Lighting:GetPropertyChangedSignal("Ambient"):Connect(applyBright)
+    Lighting:GetPropertyChangedSignal("FogEnd"):Connect(applyBright)
+    Lighting:GetPropertyChangedSignal("GlobalShadows"):Connect(applyBright)
+end
+
+function PlayerService.SetupFPSBooster()
+    if not Config.EnableFPSBooster then return end
+
+    local function optimizeInstance(instance)
+        pcall(function()
+            if instance:IsA("BasePart") and not instance:IsA("MeshPart") then
+                instance.Material = Enum.Material.SmoothPlastic
+                instance.Reflectance = 0
+                instance.CastShadow = false
+            elseif instance:IsA("Decal") or instance:IsA("Texture") then
+                -- Прячем текстуры и декали (прозрачность, чтобы не ломать логику игры, если она их ищет)
+                instance.Transparency = 1 
+            elseif instance:IsA("ParticleEmitter") or instance:IsA("Trail") then
+                instance.Enabled = false
+            end
+        end)
+    end
+
+    -- Оптимизируем существующие объекты
+    for _, desc in ipairs(Workspace:GetDescendants()) do
+        optimizeInstance(desc)
+    end
+
+    -- Слушаем новые объекты
+    Workspace.DescendantAdded:Connect(optimizeInstance)
+    Utils.Notify("FPS Booster", "Материалы упрощены, тени отключены.")
+end
+
+function PlayerService.Initialize()
+    PlayerService.SetupAntiRubberband()
+    PlayerService.SetupFullBright()
+    PlayerService.SetupFPSBooster()
+end
+
+-- ==========================================
+-- ИНИЦИАЛИЗАЦИЯ ВСЕХ МОДУЛЕЙ
+-- ==========================================
+pcall(function()
+    RoomService.Initialize()
+    EntityService.Initialize()
+    PlayerService.Initialize()
+    Utils.Notify("Скрипт Загружен", "Модули успешно инициализированы!")
+end)
