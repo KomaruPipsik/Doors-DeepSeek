@@ -166,20 +166,7 @@ TabPanel.ClipsDescendants = false
 TabPanel.Parent = Root
 Instance.new("UICorner", TabPanel).CornerRadius = UDim.new(0, 10)
 
-local TabList = Instance.new("UIListLayout")
-TabList.FillDirection = Enum.FillDirection.Vertical
-TabList.HorizontalAlignment = Enum.HorizontalAlignment.Left
-TabList.VerticalAlignment = Enum.VerticalAlignment.Top
-TabList.SortOrder = Enum.SortOrder.LayoutOrder
-TabList.Padding = UDim.new(0, 5)
-TabList.Parent = TabPanel
-
-local TabPad = Instance.new("UIPadding")
-TabPad.PaddingTop    = UDim.new(0, 10)
-TabPad.PaddingLeft   = UDim.new(0, 6)
-TabPad.PaddingRight  = UDim.new(0, 6)
-TabPad.PaddingBottom = UDim.new(0, 6)
-TabPad.Parent = TabPanel
+-- кнопки позиционируем вручную через tabYOffset
 
 -- ── RIGHT content area ───────────────────────────
 local ContentArea = Instance.new("Frame")
@@ -209,11 +196,12 @@ local function SelectTab(name)
     activeTab = name
 end
 
-local tabOrder = 0
+local tabYOffset = 10
 local function AddTab(icon, label)
-    tabOrder = tabOrder + 1
     local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(1, 0, 0, 36)
+    btn.Size = UDim2.new(0, 118, 0, 36)
+    btn.Position = UDim2.new(0, 6, 0, tabYOffset)
+    tabYOffset = tabYOffset + 41
     btn.BackgroundColor3 = TAB_OFF
     btn.Text = icon .. "  " .. label
     btn.TextColor3 = Color3.fromRGB(140,140,160)
@@ -221,7 +209,6 @@ local function AddTab(icon, label)
     btn.Font = Enum.Font.GothamBold
     btn.TextXAlignment = Enum.TextXAlignment.Left
     btn.AutoButtonColor = false
-    btn.LayoutOrder = tabOrder
     btn.Parent = TabPanel
     Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
     local bp = Instance.new("UIPadding"); bp.PaddingLeft = UDim.new(0,10); bp.Parent = btn
