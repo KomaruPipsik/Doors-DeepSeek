@@ -1,72 +1,74 @@
---// DOORS SCRIPT v3.0
---// Табовое меню: ESP / МОНСТРЫ / ИГРОКИ / ТЕСТ
---// Баги: двери, глаза, раш/амбуш плавно + плита, фигура
+--// DOORS SCRIPT v3.1
+--// Tabbed menu: ESP / МОНСТРЫ / ИГРОКИ / ТЕСТ
+--// Fixes: tab buttons top-aligned, smooth rush/ambush ignores anti-tp,
+--//        doors highlight through walls, new items ESP
 
-local Players       = game:GetService("Players")
-local Workspace     = game:GetService("Workspace")
-local RunService    = game:GetService("RunService")
-local CoreGui       = game:GetService("CoreGui")
+local Players          = game:GetService("Players")
+local Workspace        = game:GetService("Workspace")
+local RunService       = game:GetService("RunService")
+local CoreGui          = game:GetService("CoreGui")
 local UserInputService = game:GetService("UserInputService")
-local StarterGui    = game:GetService("StarterGui")
+local StarterGui       = game:GetService("StarterGui")
 
-local Player  = Players.LocalPlayer
-local Camera  = Workspace.CurrentCamera
-local Character     = Player.Character or Player.CharacterAdded:Wait()
-local Humanoid      = Character:WaitForChild("Humanoid")
+local Player           = Players.LocalPlayer
+local Camera           = Workspace.CurrentCamera
+local Character        = Player.Character or Player.CharacterAdded:Wait()
+local Humanoid         = Character:WaitForChild("Humanoid")
 local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
 
 Player.CharacterAdded:Connect(function(char)
-    Character = char
-    Humanoid  = char:WaitForChild("Humanoid")
+    Character        = char
+    Humanoid         = char:WaitForChild("Humanoid")
     HumanoidRootPart = char:WaitForChild("HumanoidRootPart")
 end)
 
 -- ══════════════════════════════════════════════
 --  STATE FLAGS
 -- ══════════════════════════════════════════════
-local doorsESPEnabled  = false
-local keyESPEnabled    = false
-local leverESPEnabled  = false
-local booksESP         = false
-local crucifixESP      = false
-local itemsESP         = false
-local snareESP         = false
-local polesESP         = false
+local doorsESPEnabled   = false
+local keyESPEnabled     = false
+local leverESPEnabled   = false
+local booksESP          = false
+local crucifixESP       = false
+local itemsESP          = false
+local snareESP          = false
+local polesESP          = false
 
-local rushAmbushESP    = false
-local rushNotif        = false
-local rushUpEnabled    = false
-local ambushDownEnabled= false
-local eyesESP          = false
-local eyesAntiDmg      = false
-local screechNotif     = false
-local screechTurn      = false
-local figureESP        = false
-local figureAvoid      = false
-local avoidRadius      = 15
+local rushAmbushESP     = false
+local rushNotif         = false
+local rushUpEnabled     = false
+local ambushDownEnabled = false
+local eyesESP           = false
+local eyesAntiDmg       = false
+local screechNotif      = false
+local screechTurn       = false
+local figureESP         = false
+local figureAvoid       = false
+local avoidRadius       = 15
 
-local playerESPEnabled = false
-local speedEnabled     = false
-local customSpeed      = 16
-local antiTpEnabled    = false
-local customFOV        = 70
+local playerESPEnabled  = false
+local speedEnabled      = false
+local customSpeed       = 16
+local antiTpEnabled     = false
+local customFOV         = 70
 
--- Rush/Ambush smooth move state
-local rushActive    = false
-local ambushActive  = false
-local rushSavedY    = nil
-local ambushSavedY  = nil
-local rushMoveTick  = 0
-local ambushMoveTick= 0
-local MOVE_DUR      = 0.4   -- секунды плавного перехода
-local OFFSET_Y      = 25    -- блоков смещения
+-- Rush/Ambush smooth move
+local rushActive        = false
+local ambushActive      = false
+local rushSavedY        = nil
+local ambushSavedY      = nil
+local MOVE_DUR          = 1.5   -- секунд плавного движения (медленнее)
+local OFFSET_Y          = 25
 
--- Плита под игроком во время раша/амбуша
-local safePlatform  = nil
+-- Плита под игроком
+local safePlatform      = nil
 
-local notifiedRush  = {}
-local activeSreech  = nil
-local screechNames  = {Screech=true, ScreechRetro=true, ScreechRushMode=true}
+-- Anti-tp bypass: пока идёт плавное движение — блокируем анти-тп
+local bypassAntiTp      = false
+
+local notifiedRush      = {}
+local activeSreech      = nil
+local screechNames      = {Screech=true, ScreechRetro=true, ScreechRushMode=true}
 
 local function SendNotif(title, text)
     pcall(function()
@@ -75,37 +77,25 @@ local function SendNotif(title, text)
 end
 
 -- ══════════════════════════════════════════════
---  GUI  (tabbed layout)
+--  GUI
 -- ══════════════════════════════════════════════
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "DoorsV3"
+ScreenGui.Name = "DoorsV31"
 ScreenGui.ResetOnSpawn = false
 pcall(function() ScreenGui.Parent = CoreGui end)
 if ScreenGui.Parent ~= CoreGui then
     ScreenGui.Parent = Player:WaitForChild("PlayerGui")
 end
 
--- Root window
 local Root = Instance.new("Frame")
 Root.Name = "Root"
-Root.Size = UDim2.new(0, 580, 0, 460)
-Root.Position = UDim2.new(0, 20, 0.5, -230)
+Root.Size = UDim2.new(0, 590, 0, 470)
+Root.Position = UDim2.new(0, 20, 0.5, -235)
 Root.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
 Root.BorderSizePixel = 0
 Root.Visible = true
 Root.Parent = ScreenGui
 Instance.new("UICorner", Root).CornerRadius = UDim.new(0, 12)
-
--- Drop shadow fake
-local Shadow = Instance.new("Frame")
-Shadow.Size = UDim2.new(1, 6, 1, 6)
-Shadow.Position = UDim2.new(0, -3, 0, 3)
-Shadow.BackgroundColor3 = Color3.fromRGB(0,0,0)
-Shadow.BackgroundTransparency = 0.6
-Shadow.BorderSizePixel = 0
-Shadow.ZIndex = Root.ZIndex - 1
-Shadow.Parent = Root
-Instance.new("UICorner", Shadow).CornerRadius = UDim.new(0, 14)
 
 -- Title bar
 local TitleBar = Instance.new("Frame")
@@ -114,12 +104,19 @@ TitleBar.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
 TitleBar.BorderSizePixel = 0
 TitleBar.Parent = Root
 Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, 12)
+-- square bottom corners on title
+local TitleMaskBottom = Instance.new("Frame")
+TitleMaskBottom.Size = UDim2.new(1, 0, 0, 12)
+TitleMaskBottom.Position = UDim2.new(0, 0, 1, -12)
+TitleMaskBottom.BackgroundColor3 = TitleBar.BackgroundColor3
+TitleMaskBottom.BorderSizePixel = 0
+TitleMaskBottom.Parent = TitleBar
 
 local TitleLbl = Instance.new("TextLabel")
 TitleLbl.Size = UDim2.new(1, -50, 1, 0)
 TitleLbl.Position = UDim2.new(0, 12, 0, 0)
 TitleLbl.BackgroundTransparency = 1
-TitleLbl.Text = "🚪  DOORS UTILITY  v3.0"
+TitleLbl.Text = "🚪  DOORS UTILITY  v3.1"
 TitleLbl.TextColor3 = Color3.fromRGB(200, 200, 215)
 TitleLbl.TextSize = 13
 TitleLbl.Font = Enum.Font.GothamBold
@@ -141,9 +138,7 @@ HintLbl.Parent = TitleBar
 local dragging, dragStart, winStart = false, nil, nil
 TitleBar.InputBegan:Connect(function(i)
     if i.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragging  = true
-        dragStart = i.Position
-        winStart  = Root.Position
+        dragging = true; dragStart = i.Position; winStart = Root.Position
     end
 end)
 UserInputService.InputChanged:Connect(function(i)
@@ -157,103 +152,102 @@ UserInputService.InputEnded:Connect(function(i)
     if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
 end)
 UserInputService.InputBegan:Connect(function(i, gp)
-    if not gp and i.KeyCode == Enum.KeyCode.RightShift then
-        Root.Visible = not Root.Visible
-    end
+    if not gp and i.KeyCode == Enum.KeyCode.RightShift then Root.Visible = not Root.Visible end
 end)
 
 -- ── LEFT tab panel ──────────────────────────────
 local TabPanel = Instance.new("Frame")
-TabPanel.Size = UDim2.new(0, 130, 1, -44)
-TabPanel.Position = UDim2.new(0, 0, 0, 44)
+TabPanel.Name = "TabPanel"
+TabPanel.Size = UDim2.new(0, 130, 1, -36)   -- от низа title bar до низа окна
+TabPanel.Position = UDim2.new(0, 0, 0, 36)
 TabPanel.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
 TabPanel.BorderSizePixel = 0
+TabPanel.ClipsDescendants = true
 TabPanel.Parent = Root
+Instance.new("UICorner", TabPanel).CornerRadius = UDim.new(0, 12)
+-- скрыть правые скруглённые углы
+local TM = Instance.new("Frame")
+TM.Size = UDim2.new(0, 12, 1, 0); TM.Position = UDim2.new(1, -12, 0, 0)
+TM.BackgroundColor3 = TabPanel.BackgroundColor3; TM.BorderSizePixel = 0; TM.Parent = TabPanel
 
-local TabPanelCorner = Instance.new("UICorner")
-TabPanelCorner.CornerRadius = UDim.new(0, 12)
-TabPanelCorner.Parent = TabPanel
-
--- Mask top-right and bottom-right corners so they look square on the right side
-local TabMask = Instance.new("Frame")
-TabMask.Size = UDim2.new(0, 12, 1, 0)
-TabMask.Position = UDim2.new(1, -12, 0, 0)
-TabMask.BackgroundColor3 = TabPanel.BackgroundColor3
-TabMask.BorderSizePixel = 0
-TabMask.Parent = TabPanel
-
+-- ВАЖНО: FillDirection = Vertical + HorizontalAlignment = Left чтобы кнопки шли сверху вниз
 local TabList = Instance.new("UIListLayout")
+TabList.FillDirection = Enum.FillDirection.Vertical
+TabList.HorizontalAlignment = Enum.HorizontalAlignment.Left
+TabList.VerticalAlignment = Enum.VerticalAlignment.Top
 TabList.SortOrder = Enum.SortOrder.LayoutOrder
 TabList.Padding = UDim.new(0, 4)
 TabList.Parent = TabPanel
 
-local UIPad = Instance.new("UIPadding")
-UIPad.PaddingTop    = UDim.new(0, 10)
-UIPad.PaddingLeft   = UDim.new(0, 8)
-UIPad.PaddingRight  = UDim.new(0, 8)
-UIPad.Parent = TabPanel
+local TabPad = Instance.new("UIPadding")
+TabPad.PaddingTop = UDim.new(0, 10)
+TabPad.PaddingLeft = UDim.new(0, 8)
+TabPad.PaddingRight = UDim.new(0, 8)
+TabPad.Parent = TabPanel
 
 -- ── RIGHT content area ───────────────────────────
 local ContentArea = Instance.new("Frame")
-ContentArea.Size = UDim2.new(1, -138, 1, -44)
-ContentArea.Position = UDim2.new(0, 138, 0, 44)
+ContentArea.Size = UDim2.new(1, -138, 1, -40)
+ContentArea.Position = UDim2.new(0, 138, 0, 38)
 ContentArea.BackgroundTransparency = 1
 ContentArea.Parent = Root
 
--- ── Helpers ──────────────────────────────────────
-local TAB_CLR_OFF = Color3.fromRGB(32, 32, 42)
-local TAB_CLR_ON  = Color3.fromRGB(55, 90, 200)
-local TOGGLE_OFF_BG  = Color3.fromRGB(32, 32, 42)
-local TOGGLE_ON_BG   = Color3.fromRGB(30, 60, 30)
+-- ══════════════════════════════════════════════
+--  UI HELPERS
+-- ══════════════════════════════════════════════
+local TAB_OFF = Color3.fromRGB(32, 32, 42)
+local TAB_ON  = Color3.fromRGB(55, 90, 200)
+local BTN_OFF = Color3.fromRGB(30, 30, 40)
+local BTN_ON  = Color3.fromRGB(28, 58, 28)
 
-local tabs = {}          -- {btn, page}
+local tabs = {}
 local activeTab = nil
 
 local function SelectTab(name)
     for n, t in pairs(tabs) do
         local on = (n == name)
-        t.btn.BackgroundColor3 = on and TAB_CLR_ON or TAB_CLR_OFF
+        t.btn.BackgroundColor3 = on and TAB_ON or TAB_OFF
         t.btn.TextColor3 = on and Color3.fromRGB(255,255,255) or Color3.fromRGB(140,140,160)
         t.page.Visible = on
     end
     activeTab = name
 end
 
+local tabOrder = 0
 local function AddTab(icon, label)
+    tabOrder = tabOrder + 1
     local btn = Instance.new("TextButton")
     btn.Size = UDim2.new(1, 0, 0, 40)
-    btn.BackgroundColor3 = TAB_CLR_OFF
+    btn.BackgroundColor3 = TAB_OFF
     btn.Text = icon .. "  " .. label
-    btn.TextColor3 = Color3.fromRGB(140, 140, 160)
+    btn.TextColor3 = Color3.fromRGB(140,140,160)
     btn.TextSize = 13
     btn.Font = Enum.Font.GothamBold
     btn.TextXAlignment = Enum.TextXAlignment.Left
     btn.AutoButtonColor = false
+    btn.LayoutOrder = tabOrder
     btn.Parent = TabPanel
     Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
-    local btnPad = Instance.new("UIPadding")
-    btnPad.PaddingLeft = UDim.new(0, 10)
-    btnPad.Parent = btn
+    local bp = Instance.new("UIPadding"); bp.PaddingLeft = UDim.new(0,10); bp.Parent = btn
 
     local page = Instance.new("ScrollingFrame")
-    page.Size = UDim2.new(1, -8, 1, -8)
-    page.Position = UDim2.new(0, 4, 0, 4)
+    page.Size = UDim2.new(1, -6, 1, -6)
+    page.Position = UDim2.new(0, 3, 0, 3)
     page.BackgroundTransparency = 1
-    page.CanvasSize = UDim2.new(0, 0, 0, 0)
+    page.CanvasSize = UDim2.new(0,0,0,0)
     page.AutomaticCanvasSize = Enum.AutomaticSize.Y
     page.ScrollBarThickness = 4
-    page.ScrollBarImageColor3 = Color3.fromRGB(80, 80, 100)
+    page.ScrollBarImageColor3 = Color3.fromRGB(80,80,100)
     page.Visible = false
     page.Parent = ContentArea
 
     local list = Instance.new("UIListLayout")
     list.SortOrder = Enum.SortOrder.LayoutOrder
-    list.Padding = UDim.new(0, 6)
+    list.Padding = UDim.new(0, 5)
     list.Parent = page
 
     local pad = Instance.new("UIPadding")
-    pad.PaddingTop = UDim.new(0, 4)
-    pad.PaddingRight = UDim.new(0, 4)
+    pad.PaddingTop = UDim.new(0,4); pad.PaddingRight = UDim.new(0,4)
     pad.Parent = page
 
     tabs[label] = {btn=btn, page=page}
@@ -261,86 +255,12 @@ local function AddTab(icon, label)
     return page
 end
 
-local function AddToggle(page, name, callback)
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(1, 0, 0, 34)
-    btn.BackgroundColor3 = TOGGLE_OFF_BG
-    btn.Text = "  ○  " .. name
-    btn.TextColor3 = Color3.fromRGB(200, 80, 80)
-    btn.TextSize = 13
-    btn.Font = Enum.Font.GothamSemibold
-    btn.TextXAlignment = Enum.TextXAlignment.Left
-    btn.AutoButtonColor = false
-    btn.Parent = page
-    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 7)
-    local state = false
-    btn.MouseButton1Click:Connect(function()
-        state = not state
-        btn.Text = state and ("  ●  " .. name) or ("  ○  " .. name)
-        btn.TextColor3 = state and Color3.fromRGB(80,220,100) or Color3.fromRGB(200,80,80)
-        btn.BackgroundColor3 = state and TOGGLE_ON_BG or TOGGLE_OFF_BG
-        callback(state)
-    end)
-    return btn
-end
-
-local function AddSlider(page, name, minV, maxV, default, callback)
-    local con = Instance.new("Frame")
-    con.Size = UDim2.new(1, 0, 0, 54)
-    con.BackgroundColor3 = TOGGLE_OFF_BG
-    con.Parent = page
-    Instance.new("UICorner", con).CornerRadius = UDim.new(0, 7)
-
-    local lbl = Instance.new("TextLabel")
-    lbl.Size = UDim2.new(1,-8,0,22)
-    lbl.Position = UDim2.new(0,8,0,2)
-    lbl.BackgroundTransparency = 1
-    lbl.Text = name .. ": " .. tostring(default)
-    lbl.TextColor3 = Color3.fromRGB(210,210,210)
-    lbl.TextSize = 12
-    lbl.Font = Enum.Font.GothamSemibold
-    lbl.TextXAlignment = Enum.TextXAlignment.Left
-    lbl.Parent = con
-
-    local bar = Instance.new("TextButton")
-    bar.Size = UDim2.new(0.92,0,0,9)
-    bar.Position = UDim2.new(0.04,0,0,36)
-    bar.BackgroundColor3 = Color3.fromRGB(55,55,70)
-    bar.Text = ""
-    bar.Parent = con
-    Instance.new("UICorner", bar).CornerRadius = UDim.new(0,4)
-
-    local fill = Instance.new("Frame")
-    fill.Size = UDim2.new((default-minV)/(maxV-minV),0,1,0)
-    fill.BackgroundColor3 = Color3.fromRGB(55,100,230)
-    fill.BorderSizePixel = 0
-    fill.Parent = bar
-    Instance.new("UICorner", fill).CornerRadius = UDim.new(0,4)
-
-    local drag2 = false
-    bar.InputBegan:Connect(function(i)
-        if i.UserInputType==Enum.UserInputType.MouseButton1 then drag2=true end
-    end)
-    UserInputService.InputEnded:Connect(function(i)
-        if i.UserInputType==Enum.UserInputType.MouseButton1 then drag2=false end
-    end)
-    UserInputService.InputChanged:Connect(function(i)
-        if drag2 and i.UserInputType==Enum.UserInputType.MouseMovement then
-            local pct = math.clamp((UserInputService:GetMouseLocation().X - bar.AbsolutePosition.X)/bar.AbsoluteSize.X,0,1)
-            fill.Size = UDim2.new(pct,0,1,0)
-            local val = math.floor(minV+(maxV-minV)*pct)
-            lbl.Text = name .. ": " .. tostring(val)
-            callback(val)
-        end
-    end)
-end
-
 local function AddLabel(page, text)
     local lbl = Instance.new("TextLabel")
-    lbl.Size = UDim2.new(1,0,0,22)
-    lbl.BackgroundColor3 = Color3.fromRGB(35,35,50)
+    lbl.Size = UDim2.new(1,0,0,20)
+    lbl.BackgroundColor3 = Color3.fromRGB(35,35,52)
     lbl.Text = "  " .. text
-    lbl.TextColor3 = Color3.fromRGB(130,160,255)
+    lbl.TextColor3 = Color3.fromRGB(120,150,255)
     lbl.TextSize = 11
     lbl.Font = Enum.Font.GothamBold
     lbl.TextXAlignment = Enum.TextXAlignment.Left
@@ -348,63 +268,125 @@ local function AddLabel(page, text)
     Instance.new("UICorner", lbl).CornerRadius = UDim.new(0,5)
 end
 
+local function AddToggle(page, name, callback)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1,0,0,33)
+    btn.BackgroundColor3 = BTN_OFF
+    btn.Text = "  ○  " .. name
+    btn.TextColor3 = Color3.fromRGB(200,80,80)
+    btn.TextSize = 12
+    btn.Font = Enum.Font.GothamSemibold
+    btn.TextXAlignment = Enum.TextXAlignment.Left
+    btn.AutoButtonColor = false
+    btn.Parent = page
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0,7)
+    local state = false
+    btn.MouseButton1Click:Connect(function()
+        state = not state
+        btn.Text = (state and "  ●  " or "  ○  ") .. name
+        btn.TextColor3 = state and Color3.fromRGB(80,220,100) or Color3.fromRGB(200,80,80)
+        btn.BackgroundColor3 = state and BTN_ON or BTN_OFF
+        callback(state)
+    end)
+end
+
+local function AddSlider(page, name, minV, maxV, default, callback)
+    local con = Instance.new("Frame")
+    con.Size = UDim2.new(1,0,0,52)
+    con.BackgroundColor3 = BTN_OFF
+    con.Parent = page
+    Instance.new("UICorner", con).CornerRadius = UDim.new(0,7)
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1,-8,0,22); lbl.Position = UDim2.new(0,8,0,2)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = name..": "..tostring(default)
+    lbl.TextColor3 = Color3.fromRGB(210,210,210)
+    lbl.TextSize = 12; lbl.Font = Enum.Font.GothamSemibold
+    lbl.TextXAlignment = Enum.TextXAlignment.Left; lbl.Parent = con
+
+    local bar = Instance.new("TextButton")
+    bar.Size = UDim2.new(0.92,0,0,9); bar.Position = UDim2.new(0.04,0,0,36)
+    bar.BackgroundColor3 = Color3.fromRGB(50,50,65); bar.Text = ""; bar.Parent = con
+    Instance.new("UICorner", bar).CornerRadius = UDim.new(0,4)
+
+    local fill = Instance.new("Frame")
+    fill.Size = UDim2.new((default-minV)/(maxV-minV),0,1,0)
+    fill.BackgroundColor3 = Color3.fromRGB(55,100,230); fill.BorderSizePixel=0; fill.Parent=bar
+    Instance.new("UICorner", fill).CornerRadius = UDim.new(0,4)
+
+    local drag2=false
+    bar.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then drag2=true end end)
+    UserInputService.InputEnded:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then drag2=false end end)
+    UserInputService.InputChanged:Connect(function(i)
+        if drag2 and i.UserInputType==Enum.UserInputType.MouseMovement then
+            local pct=math.clamp((UserInputService:GetMouseLocation().X-bar.AbsolutePosition.X)/bar.AbsoluteSize.X,0,1)
+            fill.Size=UDim2.new(pct,0,1,0)
+            local val=math.floor(minV+(maxV-minV)*pct)
+            lbl.Text=name..": "..tostring(val)
+            callback(val)
+        end
+    end)
+end
+
 -- ══════════════════════════════════════════════
 --  BUILD TABS
 -- ══════════════════════════════════════════════
-local pageESP      = AddTab("🔍", "ЕСП")
-local pageMobs     = AddTab("👹", "МОНСТРЫ")
-local pagePlayers  = AddTab("👥", "ИГРОКИ")
-local pageTest     = AddTab("🧪", "ТЕСТ")
+local pageESP     = AddTab("🔍","ЕСП")
+local pageMobs    = AddTab("👹","МОНСТРЫ")
+local pagePlayers = AddTab("👥","ИГРОКИ")
+local pageTest    = AddTab("🧪","ТЕСТ")
 
 -- ── ЕСП ──────────────────────────────────────
-AddLabel(pageESP, "Двери")
-AddToggle(pageESP, "Правильная дверь ESP", function(s) doorsESPEnabled=s; refreshDoorsESP() end)
-AddLabel(pageESP, "Предметы")
-AddToggle(pageESP, "Ключ ESP + обводка",          function(s) keyESPEnabled=s;   refreshKeysESP() end)
-AddToggle(pageESP, "Рычаг для ворот ESP",          function(s) leverESPEnabled=s; refreshLeverESP() end)
-AddToggle(pageESP, "Книги (комн. 50) ESP",         function(s) booksESP=s;        refreshBooksESP() end)
-AddToggle(pageESP, "Крест ESP",                    function(s) crucifixESP=s;     refreshCrucifixESP() end)
-AddToggle(pageESP, "Предметы в столе ESP",         function(s) itemsESP=s;        refreshItemsESP() end)
-AddToggle(pageESP, "Ловушки (90-99) ESP",          function(s) snareESP=s end)
-AddToggle(pageESP, "Рычаги (комн. 100) ESP",       function(s) polesESP=s end)
+AddLabel(pageESP,"Двери")
+AddToggle(pageESP,"Правильная дверь ESP + обводка", function(s) doorsESPEnabled=s; refreshDoorsESP() end)
+
+AddLabel(pageESP,"Предметы")
+AddToggle(pageESP,"Ключ ESP + обводка",             function(s) keyESPEnabled=s;   refreshKeysESP() end)
+AddToggle(pageESP,"Рычаг для ворот ESP",            function(s) leverESPEnabled=s; refreshLeverESP() end)
+AddToggle(pageESP,"Книги (комн. 50) ESP",           function(s) booksESP=s;        refreshBooksESP() end)
+AddToggle(pageESP,"Крест ESP",                      function(s) crucifixESP=s;     refreshCrucifixESP() end)
+AddToggle(pageESP,"Предметы (стол/стул) ESP",       function(s) itemsESP=s;        refreshItemsESP() end)
+AddToggle(pageESP,"Ловушки (90-99) ESP",            function(s) snareESP=s end)
+AddToggle(pageESP,"Рычаги (комн. 100) ESP",         function(s) polesESP=s end)
 
 -- ── МОНСТРЫ ──────────────────────────────────
-AddLabel(pageMobs, "Rush / Ambush")
-AddToggle(pageMobs, "Rush & Ambush ESP",           function(s) rushAmbushESP=s end)
-AddToggle(pageMobs, "Rush & Ambush уведомления",   function(s) rushNotif=s end)
-AddToggle(pageMobs, "Rush → плавно вверх +25",     function(s) rushUpEnabled=s end)
-AddToggle(pageMobs, "Ambush → плавно вниз -25",    function(s) ambushDownEnabled=s end)
-AddLabel(pageMobs, "Глаза / Скрич")
-AddToggle(pageMobs, "Eyes ESP",                    function(s) eyesESP=s end)
-AddToggle(pageMobs, "Eyes — не смотреть",          function(s) eyesAntiDmg=s end)
-AddToggle(pageMobs, "Screech уведомление",         function(s) screechNotif=s end)
-AddToggle(pageMobs, "Screech авто-поворот камеры", function(s) screechTurn=s end)
-AddLabel(pageMobs, "Figure")
-AddToggle(pageMobs, "Figure ESP",                  function(s) figureESP=s end)
-AddToggle(pageMobs, "Figure авто-отход",           function(s) figureAvoid=s end)
-AddSlider(pageMobs, "Figure радиус отхода", 5, 40, 15, function(v) avoidRadius=v end)
+AddLabel(pageMobs,"Rush / Ambush")
+AddToggle(pageMobs,"Rush & Ambush ESP",             function(s) rushAmbushESP=s end)
+AddToggle(pageMobs,"Rush & Ambush уведомления",     function(s) rushNotif=s end)
+AddToggle(pageMobs,"Rush → вверх +25 (плавно)",     function(s) rushUpEnabled=s end)
+AddToggle(pageMobs,"Ambush → вниз -25 (плавно)",    function(s) ambushDownEnabled=s end)
+AddLabel(pageMobs,"Глаза / Скрич")
+AddToggle(pageMobs,"Eyes ESP",                      function(s) eyesESP=s end)
+AddToggle(pageMobs,"Eyes — не смотреть",            function(s) eyesAntiDmg=s end)
+AddToggle(pageMobs,"Screech уведомление",           function(s) screechNotif=s end)
+AddToggle(pageMobs,"Screech авто-поворот камеры",   function(s) screechTurn=s end)
+AddLabel(pageMobs,"Figure")
+AddToggle(pageMobs,"Figure ESP",                    function(s) figureESP=s end)
+AddToggle(pageMobs,"Figure авто-отход",             function(s) figureAvoid=s end)
+AddSlider(pageMobs,"Figure радиус отхода",5,40,15,  function(v) avoidRadius=v end)
 
 -- ── ИГРОКИ ───────────────────────────────────
-AddLabel(pagePlayers, "Визуал")
-AddToggle(pagePlayers, "ESP игроков (ники + обводка)", function(s)
-    playerESPEnabled = s
+AddLabel(pagePlayers,"Визуал")
+AddToggle(pagePlayers,"ESP игроков (ники + обводка)", function(s)
+    playerESPEnabled=s
     if not s then
         for _, plr in ipairs(Players:GetPlayers()) do
-            if plr ~= Player and plr.Character then
-                local hrp = plr.Character:FindFirstChild("HumanoidRootPart")
-                if hrp then RemoveESP(hrp, "PlayerESP") end
-                RemoveHighlight(plr.Character, "PlayerESP")
+            if plr~=Player and plr.Character then
+                local hrp=plr.Character:FindFirstChild("HumanoidRootPart")
+                if hrp then RemoveESP(hrp,"PlayerESP") end
+                RemoveHighlight(plr.Character,"PlayerESP")
             end
         end
     end
 end)
-AddLabel(pagePlayers, "Движение")
-AddToggle(pagePlayers, "Кастомная скорость",       function(s) speedEnabled=s end)
-AddSlider(pagePlayers, "Скорость", 16, 60, 16,     function(v) customSpeed=v end)
-AddToggle(pagePlayers, "Анти-телепорт",            function(s) antiTpEnabled=s end)
-AddSlider(pagePlayers, "FOV", 50, 120, 70,         function(v) customFOV=v end)
-AddLabel(pagePlayers, "Прочее")
-AddToggle(pagePlayers, "Full Bright", function(s)
+AddLabel(pagePlayers,"Движение")
+AddToggle(pagePlayers,"Кастомная скорость",         function(s) speedEnabled=s end)
+AddSlider(pagePlayers,"Скорость",16,60,16,          function(v) customSpeed=v end)
+AddToggle(pagePlayers,"Анти-телепорт",              function(s) antiTpEnabled=s end)
+AddSlider(pagePlayers,"FOV",50,120,70,              function(v) customFOV=v end)
+AddLabel(pagePlayers,"Прочее")
+AddToggle(pagePlayers,"Full Bright", function(s)
     if s then
         game.Lighting.Brightness=2; game.Lighting.ClockTime=14
         game.Lighting.GlobalShadows=false
@@ -416,8 +398,8 @@ AddToggle(pagePlayers, "Full Bright", function(s)
     end
 end)
 
--- ── ТЕСТ (пусто) ─────────────────────────────
-AddLabel(pageTest, "Скоро...")
+-- ── ТЕСТ ─────────────────────────────────────
+AddLabel(pageTest,"Скоро добавим...")
 
 SelectTab("ЕСП")
 
@@ -426,116 +408,164 @@ SelectTab("ЕСП")
 -- ══════════════════════════════════════════════
 local function GetPrimaryPart(obj)
     if obj:IsA("BasePart") then return obj end
-    return obj:FindFirstChildWhichIsA("BasePart", true)
+    return obj:FindFirstChildWhichIsA("BasePart",true)
 end
 
 local function MakeESP(part, tag, text, color)
     if not part or not part.Parent then return end
     if part:FindFirstChild(tag) then return end
     local bill = Instance.new("BillboardGui")
-    bill.Name = tag
-    bill.Size = UDim2.new(0,140,0,40)
-    bill.AlwaysOnTop = true
-    bill.StudsOffset = Vector3.new(0,3.5,0)
-    bill.Adornee = part
-    bill.Parent = part
-    local lbl2 = Instance.new("TextLabel")
-    lbl2.Size = UDim2.new(1,0,1,0)
-    lbl2.BackgroundTransparency = 1
-    lbl2.Text = text
-    lbl2.TextColor3 = color
-    lbl2.TextStrokeTransparency = 0
-    lbl2.TextStrokeColor3 = Color3.new(0,0,0)
-    lbl2.TextSize = 14
-    lbl2.Font = Enum.Font.GothamBold
-    lbl2.Parent = bill
+    bill.Name=tag; bill.Size=UDim2.new(0,150,0,40)
+    bill.AlwaysOnTop=true; bill.StudsOffset=Vector3.new(0,3.5,0)
+    bill.Adornee=part; bill.Parent=part
+    local lbl=Instance.new("TextLabel")
+    lbl.Size=UDim2.new(1,0,1,0); lbl.BackgroundTransparency=1
+    lbl.Text=text; lbl.TextColor3=color
+    lbl.TextStrokeTransparency=0; lbl.TextStrokeColor3=Color3.new(0,0,0)
+    lbl.TextSize=14; lbl.Font=Enum.Font.GothamBold; lbl.Parent=bill
 end
 
 local function RemoveESP(part, tag)
     if not part then return end
-    local b = part:FindFirstChild(tag)
-    if b then b:Destroy() end
+    local b=part:FindFirstChild(tag); if b then b:Destroy() end
 end
 
 local function MakeHighlight(model, tag, color)
     if not model or not model.Parent then return end
     if model:FindFirstChild(tag.."_HL") then return end
-    local hl = Instance.new("Highlight")
-    hl.Name = tag.."_HL"
-    hl.Adornee = model
-    hl.FillColor = color
-    hl.OutlineColor = color
-    hl.FillTransparency = 0.65
-    hl.OutlineTransparency = 0
-    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-    hl.Parent = model
+    local hl=Instance.new("Highlight")
+    hl.Name=tag.."_HL"; hl.Adornee=model
+    hl.FillColor=color; hl.OutlineColor=color
+    hl.FillTransparency=0.65; hl.OutlineTransparency=0
+    hl.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop
+    hl.Parent=model
 end
 
 local function RemoveHighlight(model, tag)
     if not model then return end
-    local h = model:FindFirstChild(tag.."_HL")
-    if h then h:Destroy() end
+    local h=model:FindFirstChild(tag.."_HL"); if h then h:Destroy() end
 end
 
 local function MakeItemESP(model, tag, label, color)
-    local part = GetPrimaryPart(model)
+    local part=GetPrimaryPart(model)
     if not part then return end
-    MakeESP(part, tag, label, color)
-    MakeHighlight(model, tag, color)
+    MakeESP(part,tag,label,color)
+    MakeHighlight(model,tag,color)
     model.AncestryChanged:Connect(function()
-        if not model.Parent then
-            RemoveESP(part, tag)
-            RemoveHighlight(model, tag)
-        end
+        if not model.Parent then RemoveESP(part,tag); RemoveHighlight(model,tag) end
     end)
 end
 
 local function RemoveItemESP(model, tag)
-    RemoveESP(GetPrimaryPart(model), tag)
-    RemoveHighlight(model, tag)
+    RemoveESP(GetPrimaryPart(model),tag)
+    RemoveHighlight(model,tag)
 end
 
 -- ══════════════════════════════════════════════
 --  DOOR LOGIC
---  Правильная дверь — прямой ребёнок комнаты с именем "Door"
---  (не рекурсивный поиск, не dupeDoor внутри)
+--  Door — прямой ребёнок комнаты, без dupeDoor внутри
 -- ══════════════════════════════════════════════
 local function HandleDoor(door)
-    -- Дубль-дверь содержит внутри объект "dupeDoor"
     if door:FindFirstChild("dupeDoor") then return end
-    local part = GetPrimaryPart(door)
+    local part=GetPrimaryPart(door)
     if not part then return end
-    MakeESP(part, "DoorsESP", "✅ ПРАВИЛЬНАЯ", Color3.fromRGB(60,255,60))
+    -- Надпись
+    MakeESP(part,"DoorsESP","✅ ПРАВИЛЬНАЯ",Color3.fromRGB(60,255,60))
+    -- Обводка через стену (зелёная)
+    MakeHighlight(door,"DoorsESP",Color3.fromRGB(60,255,60))
     door.AncestryChanged:Connect(function()
-        if not door.Parent then RemoveESP(part,"DoorsESP") end
+        if not door.Parent then
+            RemoveESP(part,"DoorsESP")
+            RemoveHighlight(door,"DoorsESP")
+        end
     end)
+end
+
+-- ══════════════════════════════════════════════
+--  ITEMS TABLE (новые предметы)
+--  Формат: {parentName, childName, partName, label, color}
+--  parentName = имя родителя (Table / RolltopContainer / SmoothieSpawner / AlarmClock)
+--  childName  = имя ребёнка (Handle / GoldPile / Lighter / Vitamins / Smoothive / Candle / Main / nil)
+--  partName   = имя BasePart внутри (Handle / Hitbox / Main / nil = любой)
+-- ══════════════════════════════════════════════
+-- Логика: находим parentName → ищем childName (если указан) → ищем partName или GetPrimaryPart
+
+local ITEMS = {
+    -- Пластырь: Table > Handle
+    {parent="Table",    child="Handle",        part=nil,     label="🩹 ПЛАСТЫРЬ",  color=Color3.fromRGB(255,180,100)},
+    -- Золото: Table > GoldPile > Hitbox
+    {parent="Table",    child="GoldPile",       part="Hitbox",label="💰 ЗОЛОТО",    color=Color3.fromRGB(255,215,0)},
+    -- Свеча: Table > Candle > Handle
+    {parent="Table",    child="Candle",         part="Handle",label="🕯 СВЕЧА",     color=Color3.fromRGB(255,240,150)},
+    -- Зажигалка: RolltopContainer > Lighter > Main
+    {parent="RolltopContainer", child="Lighter",part="Main",  label="🔥 ЗАЖИГАЛКА",color=Color3.fromRGB(255,120,30)},
+    -- Витамины: RolltopContainer > Vitamins > Main
+    {parent="RolltopContainer", child="Vitamins",part="Main", label="💊 ВИТАМИНЫ",  color=Color3.fromRGB(160,255,80)},
+    -- Сок: SmoothieSpawner > Smoothive > Main
+    {parent="SmoothieSpawner",  child="Smoothive",part="Main",label="🥤 СОК",       color=Color3.fromRGB(100,220,100)},
+    -- Будильник: AlarmClock > Main
+    {parent="AlarmClock",       child="Main",   part=nil,     label="⏰ БУДИЛЬНИК", color=Color3.fromRGB(200,200,255)},
+}
+
+-- Быстрый lookup: parentName → список правил
+local ITEMS_BY_PARENT = {}
+for _, rule in ipairs(ITEMS) do
+    if not ITEMS_BY_PARENT[rule.parent] then ITEMS_BY_PARENT[rule.parent] = {} end
+    table.insert(ITEMS_BY_PARENT[rule.parent], rule)
+end
+
+local function TryItemESP(desc)
+    if not itemsESP then return end
+    local rules = ITEMS_BY_PARENT[desc.Name]
+    if not rules then return end
+    for _, rule in ipairs(rules) do
+        -- Ищем child
+        local target
+        if rule.child then
+            target = desc:FindFirstChild(rule.child)
+        else
+            target = desc
+        end
+        if target then
+            -- Ищем part
+            local part
+            if rule.part then
+                part = target:FindFirstChild(rule.part)
+            else
+                part = GetPrimaryPart(target) or target
+            end
+            if part then
+                MakeESP(part, "ItemESP_"..rule.label, rule.label, rule.color)
+                MakeHighlight(target, "ItemESP_"..rule.label, rule.color)
+                target.AncestryChanged:Connect(function()
+                    if not target.Parent then
+                        RemoveESP(part, "ItemESP_"..rule.label)
+                        RemoveHighlight(target, "ItemESP_"..rule.label)
+                    end
+                end)
+            end
+        end
+    end
 end
 
 -- ══════════════════════════════════════════════
 --  DESCENDANT HANDLER
 -- ══════════════════════════════════════════════
-local function HandleDescendant(desc, roomObj)
-    -- Двери: только прямой ребёнок комнаты (roomObj), имя "Door", это модель
-    -- HandleDescendant вызывается для ВСЕХ потомков — фильтруем
+local function HandleDescendant(desc)
     if desc.Name == "Door" and desc:IsA("Model") then
-        -- Проверяем что дверь — прямой ребёнок комнаты
-        if desc.Parent and desc.Parent.Name ~= "CurrentRooms" then
-            if doorsESPEnabled then HandleDoor(desc) end
-        end
+        if doorsESPEnabled then HandleDoor(desc) end
         return
     end
-
     if desc.Name == "KeyObtain" and keyESPEnabled then
-        MakeItemESP(desc,"KeyESP","🔑 КЛЮЧ",Color3.fromRGB(255,220,0))
-        return
+        MakeItemESP(desc,"KeyESP","🔑 КЛЮЧ",Color3.fromRGB(255,220,0)); return
     end
     if (desc.Name=="Dresser" or desc.Name=="DrawerContainer") and keyESPEnabled then
-        local k = desc:FindFirstChild("KeyObtain",true)
+        local k=desc:FindFirstChild("KeyObtain",true)
         if k then MakeItemESP(k,"KeyESP","🔑 КЛЮЧ",Color3.fromRGB(255,220,0)) end
         return
     end
-    if desc.Name == "LeverForGate" and leverESPEnabled then
-        local part = GetPrimaryPart(desc)
+    if desc.Name=="LeverForGate" and leverESPEnabled then
+        local part=GetPrimaryPart(desc)
         if part then
             MakeESP(part,"LeverESP","🔧 РЫЧАГ",Color3.fromRGB(255,255,0))
             MakeHighlight(desc,"LeverESP",Color3.fromRGB(255,255,0))
@@ -545,59 +575,45 @@ local function HandleDescendant(desc, roomObj)
         end
         return
     end
-    if desc.Name == "LiveHintBook" and booksESP then
-        MakeItemESP(desc,"BookESP","📖 КНИГА",Color3.fromRGB(0,210,255))
-        return
+    if desc.Name=="LiveHintBook" and booksESP then
+        MakeItemESP(desc,"BookESP","📖 КНИГА",Color3.fromRGB(0,210,255)); return
     end
-    if desc.Name == "CrucifixWall" and crucifixESP then
-        MakeItemESP(desc,"CrucifixESP","✝ КРЕСТ",Color3.fromRGB(255,200,50))
-        return
+    if desc.Name=="CrucifixWall" and crucifixESP then
+        MakeItemESP(desc,"CrucifixESP","✝ КРЕСТ",Color3.fromRGB(255,200,50)); return
     end
-    if desc.Name == "RolltopContainer" and itemsESP then
-        for _, child in ipairs(desc:GetChildren()) do
-            if child.Name ~= "Lid" then
-                MakeItemESP(child,"ItemESP","💊 "..child.Name,Color3.fromRGB(160,255,80))
-            end
-        end
-        desc.ChildAdded:Connect(function(child)
-            if child.Name ~= "Lid" and itemsESP then
-                MakeItemESP(child,"ItemESP","💊 "..child.Name,Color3.fromRGB(160,255,80))
-            end
-        end)
-        return
+    if desc.Name=="Snare" and snareESP then
+        local base=desc:FindFirstChild("SnareBase") or desc
+        local part=GetPrimaryPart(base) or base
+        MakeESP(part,"SnareESP","⚠ ЛОВУШКА",Color3.fromRGB(255,128,0)); return
     end
-    if desc.Name == "Snare" and snareESP then
-        local base = desc:FindFirstChild("SnareBase") or desc
-        local part = GetPrimaryPart(base) or base
-        MakeESP(part,"SnareESP","⚠ ЛОВУШКА",Color3.fromRGB(255,128,0))
-        return
+    if desc.Name=="LiveBreakerPolePickup" and polesESP then
+        local part=GetPrimaryPart(desc) or desc
+        MakeESP(part,"PoleESP","⚡ РЫЧАГ 100",Color3.fromRGB(60,255,60)); return
     end
-    if desc.Name == "LiveBreakerPolePickup" and polesESP then
-        local part = GetPrimaryPart(desc) or desc
-        MakeESP(part,"PoleESP","⚡ РЫЧАГ 100",Color3.fromRGB(60,255,60))
-        return
-    end
+    -- Новые предметы
+    TryItemESP(desc)
 end
 
--- Refresh при включении
+-- ══════════════════════════════════════════════
+--  REFRESH FUNCTIONS
+-- ══════════════════════════════════════════════
 local currentRooms = Workspace:FindFirstChild("CurrentRooms")
 
 local function ScanRooms(fn)
     if not currentRooms then return end
     for _, room in ipairs(currentRooms:GetChildren()) do
-        for _, desc in ipairs(room:GetDescendants()) do fn(desc, room) end
+        for _, desc in ipairs(room:GetDescendants()) do fn(desc) end
     end
 end
 
 function refreshDoorsESP()
     if not currentRooms then return end
     for _, room in ipairs(currentRooms:GetChildren()) do
-        -- Ищем Door только среди прямых детей комнаты
         for _, child in ipairs(room:GetChildren()) do
-            if child.Name == "Door" and child:IsA("Model") then
-                local part = GetPrimaryPart(child)
+            if child.Name=="Door" and child:IsA("Model") then
+                local part=GetPrimaryPart(child)
                 if doorsESPEnabled then HandleDoor(child)
-                else RemoveESP(part,"DoorsESP") end
+                else RemoveESP(part,"DoorsESP"); RemoveHighlight(child,"DoorsESP") end
             end
         end
     end
@@ -615,13 +631,11 @@ end
 function refreshLeverESP()
     ScanRooms(function(d)
         if d.Name=="LeverForGate" then
-            local part = GetPrimaryPart(d)
+            local part=GetPrimaryPart(d)
             if leverESPEnabled then
                 if part then MakeESP(part,"LeverESP","🔧 РЫЧАГ",Color3.fromRGB(255,255,0)) end
                 MakeHighlight(d,"LeverESP",Color3.fromRGB(255,255,0))
-            else
-                RemoveESP(part,"LeverESP"); RemoveHighlight(d,"LeverESP")
-            end
+            else RemoveESP(part,"LeverESP"); RemoveHighlight(d,"LeverESP") end
         end
     end)
 end
@@ -645,39 +659,24 @@ function refreshCrucifixESP()
 end
 
 function refreshItemsESP()
-    ScanRooms(function(d)
-        if d.Name=="RolltopContainer" then
-            for _, child in ipairs(d:GetChildren()) do
-                if child.Name ~= "Lid" then
-                    if itemsESP then MakeItemESP(child,"ItemESP","💊 "..child.Name,Color3.fromRGB(160,255,80))
-                    else RemoveItemESP(child,"ItemESP") end
-                end
-            end
-        end
-    end)
+    ScanRooms(function(d) TryItemESP(d) end)
 end
 
--- Подписка
+-- ══════════════════════════════════════════════
+--  ROOM SUBSCRIPTION
+-- ══════════════════════════════════════════════
 local function SubscribeRoom(room)
-    -- Двери: только прямые дети
+    -- Двери — прямые дети
     for _, child in ipairs(room:GetChildren()) do
-        if child.Name == "Door" and child:IsA("Model") then
-            if doorsESPEnabled then HandleDoor(child) end
-        end
-    end
-    -- Всё остальное
-    for _, desc in ipairs(room:GetDescendants()) do
-        HandleDescendant(desc, room)
+        if child.Name=="Door" and child:IsA("Model") and doorsESPEnabled then HandleDoor(child) end
     end
     room.ChildAdded:Connect(function(child)
-        if child.Name == "Door" and child:IsA("Model") and doorsESPEnabled then
-            HandleDoor(child)
-        end
-        HandleDescendant(child, room)
+        if child.Name=="Door" and child:IsA("Model") and doorsESPEnabled then HandleDoor(child) end
+        HandleDescendant(child)
     end)
-    room.DescendantAdded:Connect(function(desc)
-        HandleDescendant(desc, room)
-    end)
+    -- Всё остальное
+    for _, desc in ipairs(room:GetDescendants()) do HandleDescendant(desc) end
+    room.DescendantAdded:Connect(HandleDescendant)
 end
 
 if currentRooms then
@@ -685,85 +684,76 @@ if currentRooms then
     currentRooms.ChildAdded:Connect(SubscribeRoom)
 else
     Workspace.ChildAdded:Connect(function(child)
-        if child.Name == "CurrentRooms" then
-            currentRooms = child
+        if child.Name=="CurrentRooms" then
+            currentRooms=child
             for _, room in ipairs(child:GetChildren()) do SubscribeRoom(room) end
             child.ChildAdded:Connect(SubscribeRoom)
         end
     end)
 end
 
--- Screech event
+-- Screech
 Workspace.DescendantAdded:Connect(function(desc)
     if screechNames[desc.Name] then
-        activeSreech = desc
+        activeSreech=desc
         if screechNotif then SendNotif("😱 SCREECH!","Скрич появился!") end
         desc.AncestryChanged:Connect(function()
-            if not desc.Parent and activeSreech == desc then activeSreech = nil end
+            if not desc.Parent and activeSreech==desc then activeSreech=nil end
         end)
     end
 end)
 
 -- ══════════════════════════════════════════════
---  SAFE PLATFORM — плита под игроком
+--  SAFE PLATFORM
 -- ══════════════════════════════════════════════
 local function CreatePlatform()
     if safePlatform then return end
-    local part = Instance.new("Part")
-    part.Name  = "_SafePlatform"
-    part.Size  = Vector3.new(8, 0.5, 8)
-    part.Anchored = true
-    part.CanCollide = true
-    part.Transparency = 0.5
-    part.BrickColor = BrickColor.new("Bright blue")
-    part.Material = Enum.Material.SmoothPlastic
-    part.Parent = Workspace
-    safePlatform = part
+    local p=Instance.new("Part")
+    p.Name="_SafePlatform"; p.Size=Vector3.new(8,0.4,8)
+    p.Anchored=true; p.CanCollide=true
+    p.Transparency=0.45; p.BrickColor=BrickColor.new("Bright blue")
+    p.Material=Enum.Material.SmoothPlastic; p.Parent=Workspace
+    safePlatform=p
 end
-
 local function RemovePlatform()
-    if safePlatform then
-        safePlatform:Destroy()
-        safePlatform = nil
-    end
+    if safePlatform then safePlatform:Destroy(); safePlatform=nil end
 end
-
 local function UpdatePlatform()
     if safePlatform and HumanoidRootPart then
-        local pos = HumanoidRootPart.Position
-        safePlatform.CFrame = CFrame.new(pos.X, pos.Y - 3.5, pos.Z)
+        local pos=HumanoidRootPart.Position
+        safePlatform.CFrame=CFrame.new(pos.X, pos.Y-3.2, pos.Z)
     end
 end
 
 -- ══════════════════════════════════════════════
---  SMOOTH MOVE helpers
+--  SMOOTH Y MOVE
+--  bypassAntiTp=true во время движения → анти-тп не мешает
 -- ══════════════════════════════════════════════
--- Плавный сдвиг по Y за MOVE_DUR секунд
-local rushMoveConn    = nil
-local ambushMoveConn  = nil
-
 local function SmoothY(fromY, toY, duration, onStep, onDone)
-    local t0 = tick()
+    local t0=tick()
+    bypassAntiTp=true
     local conn
-    conn = RunService.Heartbeat:Connect(function()
-        if not HumanoidRootPart then conn:Disconnect() return end
-        local pct = math.clamp((tick()-t0)/duration, 0, 1)
-        local ease = pct*pct*(3-2*pct)
-        local y = fromY + (toY-fromY)*ease
-        onStep(y)
-        if pct >= 1 then conn:Disconnect(); if onDone then onDone() end end
+    conn=RunService.Heartbeat:Connect(function()
+        if not HumanoidRootPart then conn:Disconnect(); bypassAntiTp=false; return end
+        local pct=math.clamp((tick()-t0)/duration,0,1)
+        local ease=pct*pct*(3-2*pct)
+        onStep(fromY+(toY-fromY)*ease)
+        UpdatePlatform()
+        if pct>=1 then
+            conn:Disconnect()
+            bypassAntiTp=false
+            if onDone then onDone() end
+        end
     end)
-    return conn
 end
 
 -- ══════════════════════════════════════════════
---  ИГРОКИ ESP
+--  PLAYER ESP
 -- ══════════════════════════════════════════════
 local function SetPlayerESP(plr, on)
-    if plr == Player then return end
-    local char = plr.Character
-    if not char then return end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if plr==Player then return end
+    local char=plr.Character; if not char then return end
+    local hrp=char:FindFirstChild("HumanoidRootPart")
     if on then
         if hrp then MakeESP(hrp,"PlayerESP","👤 "..plr.Name,Color3.fromRGB(100,200,255)) end
         MakeHighlight(char,"PlayerESP",Color3.fromRGB(100,200,255))
@@ -775,171 +765,154 @@ end
 Players.PlayerAdded:Connect(function(plr)
     plr.CharacterAdded:Connect(function()
         task.wait(1)
-        if playerESPEnabled then SetPlayerESP(plr, true) end
+        if playerESPEnabled then SetPlayerESP(plr,true) end
     end)
 end)
 
 -- ══════════════════════════════════════════════
 --  MAIN LOOP
 -- ══════════════════════════════════════════════
-local lastPos   = Vector3.new()
-local scanTick  = 0
+local lastPos  = Vector3.new()
+local scanTick = 0
 
 RunService.Heartbeat:Connect(function(dt)
-    -- Скорость
-    if speedEnabled and Humanoid then Humanoid.WalkSpeed = customSpeed end
-    -- FOV
-    Camera.FieldOfView = customFOV
-    -- Анти-телепорт
-    if antiTpEnabled and HumanoidRootPart then
-        if (HumanoidRootPart.Position - lastPos).Magnitude > 50
+    if speedEnabled and Humanoid then Humanoid.WalkSpeed=customSpeed end
+    Camera.FieldOfView=customFOV
+
+    -- Анти-телепорт — ПРОПУСКАЕМ если bypassAntiTp
+    if antiTpEnabled and not bypassAntiTp and HumanoidRootPart then
+        if (HumanoidRootPart.Position-lastPos).Magnitude>50
             and not Workspace:GetAttribute("InElevator") then
-            HumanoidRootPart.CFrame = CFrame.new(lastPos)
+            HumanoidRootPart.CFrame=CFrame.new(lastPos)
         else
-            lastPos = HumanoidRootPart.Position
+            lastPos=HumanoidRootPart.Position
         end
     elseif HumanoidRootPart then
-        lastPos = HumanoidRootPart.Position
+        lastPos=HumanoidRootPart.Position
     end
 
-    -- Монстры (раз в 0.1 сек)
-    scanTick = scanTick + dt
-    if scanTick < 0.1 then return end
-    scanTick = 0
+    scanTick=scanTick+dt
+    if scanTick<0.1 then return end
+    scanTick=0
 
-    local ws = Workspace:GetChildren()
-    local rushFound   = false
-    local ambushFound = false
+    local ws=Workspace:GetChildren()
+    local rushFound=false
+    local ambushFound=false
 
     for _, obj in ipairs(ws) do
-        local isRush   = obj.Name == "RushMoving"
-        local isAmbush = obj.Name == "AmbushMoving"
+        local isRush   = obj.Name=="RushMoving"
+        local isAmbush = obj.Name=="AmbushMoving"
 
         if isRush or isAmbush then
             if rushNotif and not notifiedRush[obj] then
-                notifiedRush[obj] = true
-                SendNotif("⚠ ВНИМАНИЕ!", (isRush and "РАШ" or "АМБУШ").." летит!")
+                notifiedRush[obj]=true
+                SendNotif("⚠ ВНИМАНИЕ!",(isRush and "РАШ" or "АМБУШ").." летит!")
             end
             if rushAmbushESP then
-                local part = GetPrimaryPart(obj)
+                local part=GetPrimaryPart(obj)
                 if part then MakeESP(part,"RushAmbushESP",isRush and "💨 РАШ" or "🌀 АМБУШ",Color3.fromRGB(255,60,60)) end
             end
 
             if isRush then
-                rushFound = true
-                -- Плавно вверх (один раз при появлении)
+                rushFound=true
                 if rushUpEnabled and HumanoidRootPart and not rushActive then
-                    rushActive  = true
-                    rushSavedY  = HumanoidRootPart.Position.Y
-                    local fromY = rushSavedY
-                    local toY   = rushSavedY + OFFSET_Y
+                    rushActive=true
+                    rushSavedY=HumanoidRootPart.Position.Y
+                    local fromY=rushSavedY
+                    local toY=rushSavedY+OFFSET_Y
                     CreatePlatform()
-                    rushMoveConn = SmoothY(fromY, toY, MOVE_DUR, function(y)
+                    SmoothY(fromY, toY, MOVE_DUR, function(y)
                         if HumanoidRootPart then
-                            local p = HumanoidRootPart.Position
-                            HumanoidRootPart.CFrame = CFrame.new(p.X, y, p.Z)
+                            local p=HumanoidRootPart.Position
+                            HumanoidRootPart.CFrame=CFrame.new(p.X,y,p.Z)
                         end
-                        UpdatePlatform()
                     end)
                 end
             end
 
             if isAmbush then
-                ambushFound = true
+                ambushFound=true
                 if ambushDownEnabled and HumanoidRootPart and not ambushActive then
-                    ambushActive = true
-                    ambushSavedY = HumanoidRootPart.Position.Y
-                    local fromY  = ambushSavedY
-                    local toY    = ambushSavedY - OFFSET_Y
+                    ambushActive=true
+                    ambushSavedY=HumanoidRootPart.Position.Y
+                    local fromY=ambushSavedY
+                    local toY=ambushSavedY-OFFSET_Y
                     CreatePlatform()
-                    ambushMoveConn = SmoothY(fromY, toY, MOVE_DUR, function(y)
+                    SmoothY(fromY, toY, MOVE_DUR, function(y)
                         if HumanoidRootPart then
-                            local p = HumanoidRootPart.Position
-                            HumanoidRootPart.CFrame = CFrame.new(p.X, y, p.Z)
+                            local p=HumanoidRootPart.Position
+                            HumanoidRootPart.CFrame=CFrame.new(p.X,y,p.Z)
                         end
-                        UpdatePlatform()
                     end)
                 end
             end
         end
 
-        -- Eyes — отворачиваем камеру
-        if obj.Name == "Eyes" then
+        -- Eyes
+        if obj.Name=="Eyes" then
             if eyesESP then
-                local part = GetPrimaryPart(obj)
+                local part=GetPrimaryPart(obj)
                 if part then MakeESP(part,"EyesESP","👁 EYES",Color3.fromRGB(180,0,255)) end
             end
             if eyesAntiDmg and HumanoidRootPart then
-                local part = GetPrimaryPart(obj)
+                local part=GetPrimaryPart(obj)
                 if part then
-                    -- Блокируем взгляд на Eyes: смотрим от них
-                    local away = (HumanoidRootPart.Position - part.Position).Unit
-                    local newLook = Camera.CFrame.Position + away
-                    Camera.CFrame = CFrame.new(Camera.CFrame.Position, newLook)
+                    local away=(HumanoidRootPart.Position-part.Position).Unit
+                    Camera.CFrame=CFrame.new(Camera.CFrame.Position, Camera.CFrame.Position+away)
                 end
             end
         end
     end
 
-    -- Возврат после Rush — плавно
+    -- Возврат после Rush
     if not rushFound and rushActive then
-        rushActive = false
+        rushActive=false
         if rushUpEnabled and HumanoidRootPart and rushSavedY then
-            local fromY = HumanoidRootPart.Position.Y
-            local toY   = rushSavedY
+            local fromY=HumanoidRootPart.Position.Y
+            local toY=rushSavedY
             SmoothY(fromY, toY, MOVE_DUR, function(y)
                 if HumanoidRootPart then
-                    local p = HumanoidRootPart.Position
-                    HumanoidRootPart.CFrame = CFrame.new(p.X, y, p.Z)
+                    local p=HumanoidRootPart.Position
+                    HumanoidRootPart.CFrame=CFrame.new(p.X,y,p.Z)
                 end
-                UpdatePlatform()
-            end, function()
-                RemovePlatform()
-                rushSavedY = nil
-            end)
+            end, function() RemovePlatform(); rushSavedY=nil end)
         end
     end
 
-    -- Возврат после Ambush — плавно
+    -- Возврат после Ambush
     if not ambushFound and ambushActive then
-        ambushActive = false
+        ambushActive=false
         if ambushDownEnabled and HumanoidRootPart and ambushSavedY then
-            local fromY = HumanoidRootPart.Position.Y
-            local toY   = ambushSavedY
+            local fromY=HumanoidRootPart.Position.Y
+            local toY=ambushSavedY
             SmoothY(fromY, toY, MOVE_DUR, function(y)
                 if HumanoidRootPart then
-                    local p = HumanoidRootPart.Position
-                    HumanoidRootPart.CFrame = CFrame.new(p.X, y, p.Z)
+                    local p=HumanoidRootPart.Position
+                    HumanoidRootPart.CFrame=CFrame.new(p.X,y,p.Z)
                 end
-                UpdatePlatform()
-            end, function()
-                RemovePlatform()
-                ambushSavedY = nil
-            end)
+            end, function() RemovePlatform(); ambushSavedY=nil end)
         end
     end
 
-    -- Screech авто-поворот
+    -- Screech
     if screechTurn and activeSreech then
-        local part = activeSreech:FindFirstChild("HumanoidRootPart") or activeSreech:FindFirstChildWhichIsA("BasePart")
-        if part then Camera.CFrame = CFrame.new(Camera.CFrame.Position, part.Position) end
+        local part=activeSreech:FindFirstChild("HumanoidRootPart") or activeSreech:FindFirstChildWhichIsA("BasePart")
+        if part then Camera.CFrame=CFrame.new(Camera.CFrame.Position,part.Position) end
     end
 
     -- Figure
     if currentRooms then
         for _, room in ipairs(currentRooms:GetChildren()) do
-            local rig = room:FindFirstChild("FigureRig",true) or room:FindFirstChild("FigureSetup",true)
+            local rig=room:FindFirstChild("FigureRig",true) or room:FindFirstChild("FigureSetup",true)
             if rig then
-                local pp = rig:FindFirstChild("HumanoidRootPart") or rig:FindFirstChildWhichIsA("BasePart")
+                local pp=rig:FindFirstChild("HumanoidRootPart") or rig:FindFirstChildWhichIsA("BasePart")
                 if pp then
                     if figureESP then MakeESP(pp,"FigureESP","👹 FIGURE",Color3.fromRGB(255,0,0)) end
-                    -- Авто-отход: двигаем HRP напрямую (Humanoid:Move ненадёжен)
                     if figureAvoid and HumanoidRootPart then
-                        local dist = (HumanoidRootPart.Position - pp.Position).Magnitude
-                        if dist < avoidRadius then
-                            local dir = (HumanoidRootPart.Position - pp.Position).Unit
-                            -- Толкаем игрока в противоположную сторону
-                            HumanoidRootPart.CFrame = HumanoidRootPart.CFrame + dir * 2
+                        local dist=(HumanoidRootPart.Position-pp.Position).Magnitude
+                        if dist<avoidRadius then
+                            local dir=(HumanoidRootPart.Position-pp.Position).Unit
+                            HumanoidRootPart.CFrame=HumanoidRootPart.CFrame+dir*2
                         end
                     end
                 end
@@ -949,10 +922,8 @@ RunService.Heartbeat:Connect(function(dt)
 
     -- Игроки ESP
     if playerESPEnabled then
-        for _, plr in ipairs(Players:GetPlayers()) do
-            SetPlayerESP(plr, true)
-        end
+        for _, plr in ipairs(Players:GetPlayers()) do SetPlayerESP(plr,true) end
     end
 end)
 
-SendNotif("Doors v3.0","RightShift = скрыть меню")
+SendNotif("Doors v3.1","RightShift = скрыть меню")
