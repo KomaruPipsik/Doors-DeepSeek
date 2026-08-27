@@ -57,8 +57,8 @@ local rushActive        = false
 local ambushActive      = false
 local rushSavedY        = nil
 local ambushSavedY      = nil
-local MOVE_DUR          = 1.5   -- секунд плавного движения (медленнее)
-local OFFSET_Y          = 25
+local MOVE_DUR          = 1.5
+local OFFSET_Y          = 45  -- +20 к исходным 25 блокам
 
 -- Плита под игроком
 local safePlatform      = nil
@@ -75,6 +75,15 @@ local function SendNotif(title, text)
         StarterGui:SetCore("SendNotification",{Title=title,Text=text,Duration=3})
     end)
 end
+
+-- Убираем туман автоматически
+local function RemoveFog()
+    game.Lighting.FogEnd = 100000
+    game.Lighting.FogStart = 99999
+    game.Lighting.FogColor = Color3.fromRGB(0,0,0)
+end
+RemoveFog()
+game.Lighting:GetPropertyChangedSignal("FogEnd"):Connect(RemoveFog)
 
 -- ══════════════════════════════════════════════
 --  GUI
@@ -449,18 +458,21 @@ end
 --  Door — прямой ребёнок комнаты, без dupeDoor внутри
 -- ══════════════════════════════════════════════
 local function HandleDoor(door)
-    if door:FindFirstChild("dupeDoor") then return end
-    local part=GetPrimaryPart(door)
-    if not part then return end
-    -- Надпись
-    MakeESP(part,"DoorsESP","✅ ПРАВИЛЬНАЯ",Color3.fromRGB(60,255,60))
-    -- Обводка через стену (зелёная)
-    MakeHighlight(door,"DoorsESP",Color3.fromRGB(60,255,60))
-    door.AncestryChanged:Connect(function()
-        if not door.Parent then
-            RemoveESP(part,"DoorsESP")
-            RemoveHighlight(door,"DoorsESP")
-        end
+    -- Ждём один кадр чтобы dupeDoor успел появиться внутри
+    task.defer(function()
+        if not door.Parent then return end
+        if door:FindFirstChild("dupeDoor") then return end
+        local part=GetPrimaryPart(door)
+        if not part then return end
+        if part:FindFirstChild("DoorsESP") then return end -- уже есть
+        MakeESP(part,"DoorsESP","✅ ПРАВИЛЬНАЯ",Color3.fromRGB(60,255,60))
+        MakeHighlight(door,"DoorsESP",Color3.fromRGB(60,255,60))
+        door.AncestryChanged:Connect(function()
+            if not door.Parent then
+                RemoveESP(part,"DoorsESP")
+                RemoveHighlight(door,"DoorsESP")
+            end
+        end)
     end)
 end
 
@@ -476,8 +488,6 @@ end
 local ITEMS = {
     -- Пластырь: Table > Handle
     {parent="Table",    child="Handle",        part=nil,     label="🩹 ПЛАСТЫРЬ",  color=Color3.fromRGB(255,180,100)},
-    -- Золото: Table > GoldPile > Hitbox
-    {parent="Table",    child="GoldPile",       part="Hitbox",label="💰 ЗОЛОТО",    color=Color3.fromRGB(255,215,0)},
     -- Свеча: Table > Candle > Handle
     {parent="Table",    child="Candle",         part="Handle",label="🕯 СВЕЧА",     color=Color3.fromRGB(255,240,150)},
     -- Зажигалка: RolltopContainer > Lighter > Main
@@ -724,7 +734,7 @@ local function SmoothY(fromY, toY, duration, onStep, onDone)
         UpdatePlatform()
         if pct>=1 then
             conn:Disconnect()
-            bypassAntiTp=false
+            -- НЕ сбрасываем bypassAntiTp здесь — он сбросится когда Rush/Ambush исчезнет
             if onDone then onDone() end
         end
     end)
@@ -858,7 +868,9 @@ RunService.Heartbeat:Connect(function(dt)
                     local p=HumanoidRootPart.Position
                     HumanoidRootPart.CFrame=CFrame.new(p.X,y,p.Z)
                 end
-            end, function() RemovePlatform(); rushSavedY=nil end)
+            end, function() RemovePlatform(); rushSavedY=nil; bypassAntiTp=false end)
+        else
+            bypassAntiTp=false
         end
     end
 
@@ -873,7 +885,9 @@ RunService.Heartbeat:Connect(function(dt)
                     local p=HumanoidRootPart.Position
                     HumanoidRootPart.CFrame=CFrame.new(p.X,y,p.Z)
                 end
-            end, function() RemovePlatform(); ambushSavedY=nil end)
+            end, function() RemovePlatform(); ambushSavedY=nil; bypassAntiTp=false end)
+        else
+            bypassAntiTp=false
         end
     end
 
