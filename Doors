@@ -57,8 +57,8 @@ local rushActive        = false
 local ambushActive      = false
 local rushSavedY        = nil
 local ambushSavedY      = nil
-local MOVE_DUR          = 1.5
-local OFFSET_Y          = 45  -- +20 к исходным 25 блокам
+local MOVE_DUR          = 5.0  -- очень плавно
+local OFFSET_Y          = 45
 
 -- Плита под игроком
 local safePlatform      = nil
@@ -372,10 +372,65 @@ AddToggle(pagePlayers,"ESP игроков (ники + обводка)", function
         end
     end
 end)
+AddToggle(pagePlayers,"X-Ray (видеть сквозь стены)", function(s)
+    xrayEnabled = s
+    if not s then
+        for _, obj in ipairs(Workspace:GetDescendants()) do
+            local hl = obj:FindFirstChild("_XRayHL")
+            if hl then hl:Destroy() end
+        end
+    end
+end)
 AddLabel(pagePlayers,"Движение")
 AddToggle(pagePlayers,"Кастомная скорость",         function(s) speedEnabled=s end)
 AddSlider(pagePlayers,"Скорость",16,60,16,          function(v) customSpeed=v end)
 AddSlider(pagePlayers,"FOV",50,120,70,              function(v) customFOV=v; Camera.FieldOfView=v end)
+AddLabel(pagePlayers,"Freecam")
+AddToggle(pagePlayers,"Freecam (WASD + мышь)", function(s)
+    freecamEnabled = s
+    if s then StartFreecam() else StopFreecam() end
+end)
+AddToggle(pagePlayers,"Запись пути (хвостик)", function(s)
+    recordingPath = s
+    if s then
+        recordedPoints = {}
+        for _, p in ipairs(pathTrail) do pcall(function() p:Destroy() end) end
+        pathTrail = {}
+    end
+end)
+
+local playBtn2 = Instance.new("TextButton")
+playBtn2.Size = UDim2.new(1,0,0,33)
+playBtn2.BackgroundColor3 = Color3.fromRGB(30,30,40)
+playBtn2.Text = "  ▶  Воспроизвести путь"
+playBtn2.TextColor3 = Color3.fromRGB(100,200,255)
+playBtn2.TextSize = 12
+playBtn2.Font = Enum.Font.GothamSemibold
+playBtn2.TextXAlignment = Enum.TextXAlignment.Left
+playBtn2.AutoButtonColor = false
+playBtn2.Parent = pagePlayers
+Instance.new("UICorner",playBtn2).CornerRadius = UDim.new(0,7)
+playBtn2.MouseButton1Click:Connect(function()
+    if not isPlayingPath and #recordedPoints > 1 then PlayPath() end
+end)
+
+local stopBtn2 = Instance.new("TextButton")
+stopBtn2.Size = UDim2.new(1,0,0,33)
+stopBtn2.BackgroundColor3 = Color3.fromRGB(40,20,20)
+stopBtn2.Text = "  ■  Стоп"
+stopBtn2.TextColor3 = Color3.fromRGB(255,100,100)
+stopBtn2.TextSize = 12
+stopBtn2.Font = Enum.Font.GothamSemibold
+stopBtn2.TextXAlignment = Enum.TextXAlignment.Left
+stopBtn2.AutoButtonColor = false
+stopBtn2.Parent = pagePlayers
+Instance.new("UICorner",stopBtn2).CornerRadius = UDim.new(0,7)
+stopBtn2.MouseButton1Click:Connect(function()
+    isPlayingPath = false
+    if pathPlatform then pathPlatform:Destroy(); pathPlatform=nil end
+end)
+AddSlider(pagePlayers,"Скорость пути",4,50,16,function(v) pathPlaySpeed=v end)
+
 AddLabel(pagePlayers,"Прочее")
 AddToggle(pagePlayers,"Full Bright", function(s)
     if s then
@@ -392,7 +447,7 @@ end)
 -- ── ТЕСТ ─────────────────────────────────────
 AddLabel(pageTest,"Скоро добавим...")
 
--- ── НОВОЕ ────────────────────────────────────
+-- ── АРХИВЫ ───────────────────────────────────
 local dronesESP      = false
 local dropsESP       = false
 local goldLootESP    = false
@@ -404,82 +459,39 @@ local freecamActive    = false
 local freecamCam       = nil
 local recordingPath    = false
 local recordedPoints   = {}
-local pathTrail        = {} -- визуальные шарики хвостика
+local pathTrail        = {}
 local isPlayingPath    = false
 local pathPlaySpeed    = 16
 local pathPlatform     = nil
 
-local pageNew = AddTab("🆕","НОВОЕ")
-AddLabel(pageNew,"Визуал")
-AddToggle(pageNew,"X-Ray (видеть сквозь стены)", function(s)
-    xrayEnabled = s
-    if not s then
-        -- убираем все xray highlights
+local pageNew = AddTab("📦","АРХИВЫ")
+AddLabel(pageNew,"Предметы из ивентов")
+AddToggle(pageNew,"Drones ESP (обводка)", function(s)
+    dronesESP = s
+    if s then
+        -- Ищем существующих
         for _, obj in ipairs(Workspace:GetDescendants()) do
-            local hl = obj:FindFirstChild("_XRayHL")
-            if hl then hl:Destroy() end
+            if obj.Name=="Drone" then
+                MakeHighlight(obj,"DroneESP",Color3.fromRGB(180,180,180))
+            end
+        end
+    else
+        for _, obj in ipairs(Workspace:GetDescendants()) do
+            RemoveHighlight(obj,"DroneESP")
         end
     end
 end)
-AddToggle(pageNew,"Drones ESP (обводка)", function(s) dronesESP=s end)
-AddToggle(pageNew,"Drops ESP (лазер/ланчбокс/кава/пицца)", function(s) dropsESP=s end)
-AddToggle(pageNew,"Золото (Assets > Loot) ESP", function(s) goldLootESP=s end)
-
-AddLabel(pageNew,"Freecam")
-AddToggle(pageNew,"Freecam (WASD + мышь)", function(s)
-    freecamEnabled = s
+AddToggle(pageNew,"Drops ESP (лазер/ланчбокс/кава/пицца)", function(s)
+    dropsESP = s
     if s then
-        StartFreecam()
-    else
-        StopFreecam()
+        for _, obj in ipairs(Workspace:GetChildren()) do
+            if obj.Name=="Drops" then HandleDrop(obj) end
+        end
     end
 end)
-AddToggle(pageNew,"Запись пути (хвостик)", function(s)
-    recordingPath = s
-    if s then
-        recordedPoints = {}
-        -- очищаем старые шарики
-        for _, p in ipairs(pathTrail) do pcall(function() p:Destroy() end) end
-        pathTrail = {}
-    end
+AddToggle(pageNew,"Золото (Loot) ESP", function(s)
+    goldLootESP = s
 end)
-
--- Кнопка воспроизведения пути
-local playBtn = Instance.new("TextButton")
-playBtn.Size = UDim2.new(1,0,0,33)
-playBtn.BackgroundColor3 = Color3.fromRGB(30,30,40)
-playBtn.Text = "  ▶  Воспроизвести путь"
-playBtn.TextColor3 = Color3.fromRGB(100,200,255)
-playBtn.TextSize = 12
-playBtn.Font = Enum.Font.GothamSemibold
-playBtn.TextXAlignment = Enum.TextXAlignment.Left
-playBtn.AutoButtonColor = false
-playBtn.Parent = pageNew
-Instance.new("UICorner",playBtn).CornerRadius = UDim.new(0,7)
-playBtn.MouseButton1Click:Connect(function()
-    if not isPlayingPath and #recordedPoints > 1 then
-        PlayPath()
-    end
-end)
-
--- Кнопка остановки пути
-local stopBtn = Instance.new("TextButton")
-stopBtn.Size = UDim2.new(1,0,0,33)
-stopBtn.BackgroundColor3 = Color3.fromRGB(40,20,20)
-stopBtn.Text = "  ■  Стоп"
-stopBtn.TextColor3 = Color3.fromRGB(255,100,100)
-stopBtn.TextSize = 12
-stopBtn.Font = Enum.Font.GothamSemibold
-stopBtn.TextXAlignment = Enum.TextXAlignment.Left
-stopBtn.AutoButtonColor = false
-stopBtn.Parent = pageNew
-Instance.new("UICorner",stopBtn).CornerRadius = UDim.new(0,7)
-stopBtn.MouseButton1Click:Connect(function()
-    isPlayingPath = false
-    if pathPlatform then pathPlatform:Destroy(); pathPlatform=nil end
-end)
-
-AddSlider(pageNew,"Скорость пути",4,50,16,function(v) pathPlaySpeed=v end)
 
 -- ── 2 ЭТАЖ ───────────────────────────────────
 local floor2ESPEnabled   = false
@@ -489,9 +501,12 @@ local minesESP           = false
 local grumboESP          = false
 local waterpumpESP       = false
 
+local mouseHoleESP       = false
+
 local pageFloor2 = AddTab("🏚","2 ЭТАЖ")
 AddLabel(pageFloor2,"Предметы")
 AddToggle(pageFloor2,"Батарея ESP + обводка",        function(s) batteryESP=s end)
+AddToggle(pageFloor2,"Нора (MouseHole) ESP",         function(s) mouseHoleESP=s end)
 AddLabel(pageFloor2,"Монстры / Опасности")
 AddToggle(pageFloor2,"GiggleCeiling ESP + обводка",  function(s) gigglesESP=s end)
 AddToggle(pageFloor2,"Генераторы (MinesGenerator)",  function(s) minesESP=s end)
@@ -696,6 +711,12 @@ local function HandleDescendant(desc)
     end
 
     -- ── 2 ЭТАЖ ──────────────────────────────
+
+    -- Нора мыши: Assets > MouseHole
+    if desc.Name=="MouseHole" and mouseHoleESP then
+        MakeItemESP(desc,"MouseHoleESP","🕳 НОРА",Color3.fromRGB(180,120,60))
+        return
+    end
 
     -- Батарея: Assets > Locker_Small > Battery
     if desc.Name=="Locker_Small" and batteryESP then
@@ -1035,6 +1056,9 @@ Players.PlayerAdded:Connect(function(plr)
     end)
 end)
 
+-- forward declaration для HandleDrop (объявляется ниже в DROPS ESP секции)
+local HandleDrop
+
 -- ══════════════════════════════════════════════
 --  X-RAY
 -- ══════════════════════════════════════════════
@@ -1218,46 +1242,52 @@ local DROPS_COLOR = {
     Pizza        = Color3.fromRGB(255,140,0),
 }
 
-local function HandleDrop(drop)
+HandleDrop = function(drop)
     if not dropsESP then return end
-    for _, child in ipairs(drop:GetChildren()) do
+    local function tryChild(child)
         local label = DROPS_MAP[child.Name]
-        if label then
-            local color = DROPS_COLOR[child.Name] or Color3.fromRGB(255,255,255)
-            MakeItemESP(child,"DropESP_"..child.Name, label, color)
-        end
+        if not label then return end
+        local color = DROPS_COLOR[child.Name]
+        task.spawn(function()
+            task.wait(0.1)
+            if not child.Parent then return end
+            local part = GetPrimaryPart(child) or child:FindFirstChildWhichIsA("BasePart",true)
+            if part then MakeESP(part,"DropESP",label,color) end
+            MakeHighlight(child,"DropESP",color)
+            child.AncestryChanged:Connect(function()
+                if not child.Parent then
+                    RemoveESP(part,"DropESP")
+                    RemoveHighlight(child,"DropESP")
+                end
+            end)
+        end)
     end
-    drop.ChildAdded:Connect(function(child)
-        if not dropsESP then return end
-        local label = DROPS_MAP[child.Name]
-        if label then
-            local color = DROPS_COLOR[child.Name] or Color3.fromRGB(255,255,255)
-            MakeItemESP(child,"DropESP_"..child.Name, label, color)
-        end
+    for _, child in ipairs(drop:GetChildren()) do tryChild(child) end
+    drop.ChildAdded:Connect(tryChild)
+end
+
+local function HandleDrone(obj)
+    if not dronesESP then return end
+    if obj:FindFirstChild("DroneESP_HL") then return end
+    MakeHighlight(obj,"DroneESP",Color3.fromRGB(180,180,180))
+    obj.AncestryChanged:Connect(function()
+        if not obj.Parent then RemoveHighlight(obj,"DroneESP") end
     end)
 end
 
--- Следим за Drops в Workspace
+-- Следим за Drops и Drones в Workspace
 Workspace.ChildAdded:Connect(function(obj)
     if obj.Name=="Drops" then HandleDrop(obj) end
-    if obj.Name=="Drone" and dronesESP then
-        MakeHighlight(obj,"DroneESP",Color3.fromRGB(150,150,150))
-        obj.AncestryChanged:Connect(function()
-            if not obj.Parent then RemoveHighlight(obj,"DroneESP") end
-        end)
-    end
 end)
 Workspace.DescendantAdded:Connect(function(obj)
-    if obj.Name=="Drone" and dronesESP then
-        MakeHighlight(obj,"DroneESP",Color3.fromRGB(150,150,150))
-        obj.AncestryChanged:Connect(function()
-            if not obj.Parent then RemoveHighlight(obj,"DroneESP") end
-        end)
-    end
+    if obj.Name=="Drone" then HandleDrone(obj) end
 end)
 -- Уже существующие
 for _, obj in ipairs(Workspace:GetChildren()) do
     if obj.Name=="Drops" then HandleDrop(obj) end
+end
+for _, obj in ipairs(Workspace:GetDescendants()) do
+    if obj.Name=="Drone" then HandleDrone(obj) end
 end
 
 -- ══════════════════════════════════════════════
