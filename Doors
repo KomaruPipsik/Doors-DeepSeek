@@ -375,8 +375,7 @@ end)
 AddLabel(pagePlayers,"Движение")
 AddToggle(pagePlayers,"Кастомная скорость",         function(s) speedEnabled=s end)
 AddSlider(pagePlayers,"Скорость",16,60,16,          function(v) customSpeed=v end)
-AddToggle(pagePlayers,"Анти-телепорт",              function(s) antiTpEnabled=s end)
-AddSlider(pagePlayers,"FOV",50,120,70,              function(v) customFOV=v end)
+AddSlider(pagePlayers,"FOV",50,120,70,              function(v) customFOV=v; Camera.FieldOfView=v end)
 AddLabel(pagePlayers,"Прочее")
 AddToggle(pagePlayers,"Full Bright", function(s)
     if s then
@@ -392,6 +391,24 @@ end)
 
 -- ── ТЕСТ ─────────────────────────────────────
 AddLabel(pageTest,"Скоро добавим...")
+
+-- ── 2 ЭТАЖ ───────────────────────────────────
+local floor2ESPEnabled   = false
+local gigglesESP         = false
+local batteryESP         = false
+local minesESP           = false
+local grumboESP          = false
+local waterpumpESP       = false
+
+local pageFloor2 = AddTab("🏚","2 ЭТАЖ")
+AddLabel(pageFloor2,"Предметы")
+AddToggle(pageFloor2,"Батарея ESP + обводка",        function(s) batteryESP=s end)
+AddLabel(pageFloor2,"Монстры / Опасности")
+AddToggle(pageFloor2,"GiggleCeiling ESP + обводка",  function(s) gigglesESP=s end)
+AddToggle(pageFloor2,"Генераторы (MinesGenerator)",  function(s) minesESP=s end)
+AddToggle(pageFloor2,"Автоматы (MinesAnchor) ESP",   function(s) floor2ESPEnabled=s end)
+AddToggle(pageFloor2,"Big Grumble ESP + обводка",    function(s) grumboESP=s end)
+AddToggle(pageFloor2,"Водяные насосы (комн.100) ESP",function(s) waterpumpESP=s end)
 
 SelectTab("ЕСП")
 
@@ -588,6 +605,72 @@ local function HandleDescendant(desc)
         local part=GetPrimaryPart(desc) or desc
         MakeESP(part,"PoleESP","⚡ РЫЧАГ 100",Color3.fromRGB(60,255,60)); return
     end
+
+    -- ── 2 ЭТАЖ ──────────────────────────────
+
+    -- Батарея: Locker_Small > Battery
+    if desc.Name=="Locker_Small" and batteryESP then
+        local bat=desc:FindFirstChild("Battery",true)
+        if bat then MakeItemESP(bat,"BatteryESP","🔋 БАТАРЕЯ",Color3.fromRGB(100,255,100)) end
+        return
+    end
+    -- GiggleCeiling
+    if desc.Name=="GiggleCeiling" and gigglesESP then
+        MakeItemESP(desc,"GiggleESP","😂 ГИГГЛ",Color3.fromRGB(255,80,200)); return
+    end
+    -- MinesGenerator
+    if desc.Name=="MinesGenerator" and minesESP then
+        MakeItemESP(desc,"MinesGenESP","⚙ ГЕНЕРАТОР",Color3.fromRGB(255,165,0)); return
+    end
+    -- _NestHandler > MinesAnchor + Grumbles > Grumbo
+    if desc.Name=="_NestHandler" then
+        if floor2ESPEnabled then
+            for _, child in ipairs(desc:GetChildren()) do
+                if child.Name=="MinesAnchor" then
+                    MakeItemESP(child,"MinesAnchorESP","🔫 АВТОМАТ",Color3.fromRGB(255,50,50))
+                end
+            end
+            desc.ChildAdded:Connect(function(child)
+                if child.Name=="MinesAnchor" and floor2ESPEnabled then
+                    MakeItemESP(child,"MinesAnchorESP","🔫 АВТОМАТ",Color3.fromRGB(255,50,50))
+                end
+            end)
+        end
+        if grumboESP then
+            local grumbles=desc:FindFirstChild("Grumbles")
+            if grumbles then
+                for _, g in ipairs(grumbles:GetChildren()) do
+                    if g.Name=="Grumbo" then
+                        MakeItemESP(g,"GrumboESP","👾 BIG GRUMBLE",Color3.fromRGB(200,0,255))
+                    end
+                end
+                grumbles.ChildAdded:Connect(function(g)
+                    if g.Name=="Grumbo" and grumboESP then
+                        MakeItemESP(g,"GrumboESP","👾 BIG GRUMBLE",Color3.fromRGB(200,0,255))
+                    end
+                end)
+            end
+        end
+        return
+    end
+    -- _DamHandler > Pumps > Flood1 > WaterPump
+    if desc.Name=="_DamHandler" and waterpumpESP then
+        local pumps=desc:FindFirstChild("Pumps")
+        if pumps then
+            for _, flood in ipairs(pumps:GetChildren()) do
+                local wp=flood:FindFirstChild("WaterPump")
+                if wp then
+                    local part=GetPrimaryPart(wp)
+                    if part then
+                        MakeESP(part,"WaterPumpESP","💧 НАСОС",Color3.fromRGB(0,180,255))
+                        MakeHighlight(wp,"WaterPumpESP",Color3.fromRGB(0,180,255))
+                    end
+                end
+            end
+        end
+        return
+    end
+
     -- Новые предметы
     TryItemESP(desc)
 end
@@ -852,21 +935,13 @@ end)
 local lastPos  = Vector3.new()
 local scanTick = 0
 
+RunService.RenderStepped:Connect(function()
+    -- FOV через RenderStepped — применяется после рендера, игра не перебивает
+    Camera.FieldOfView = customFOV
+end)
+
 RunService.Heartbeat:Connect(function(dt)
     if speedEnabled and Humanoid then Humanoid.WalkSpeed=customSpeed end
-    Camera.FieldOfView=customFOV
-
-    -- Анти-телепорт — ПРОПУСКАЕМ если bypassAntiTp
-    if antiTpEnabled and not bypassAntiTp and HumanoidRootPart then
-        if (HumanoidRootPart.Position-lastPos).Magnitude>50
-            and not Workspace:GetAttribute("InElevator") then
-            HumanoidRootPart.CFrame=CFrame.new(lastPos)
-        else
-            lastPos=HumanoidRootPart.Position
-        end
-    elseif HumanoidRootPart then
-        lastPos=HumanoidRootPart.Position
-    end
 
     scanTick=scanTick+dt
     if scanTick<0.1 then return end
