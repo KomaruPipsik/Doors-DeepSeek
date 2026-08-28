@@ -439,12 +439,17 @@ local function RemoveHighlight(model, tag)
 end
 
 local function MakeItemESP(model, tag, label, color)
-    local part=GetPrimaryPart(model)
-    if not part then return end
-    MakeESP(part,tag,label,color)
-    MakeHighlight(model,tag,color)
-    model.AncestryChanged:Connect(function()
-        if not model.Parent then RemoveESP(part,tag); RemoveHighlight(model,tag) end
+    task.spawn(function()
+        task.wait(0.1)
+        if not model.Parent then return end
+        local part=GetPrimaryPart(model)
+        if not part then return end
+        if part:FindFirstChild(tag) then return end
+        MakeESP(part,tag,label,color)
+        MakeHighlight(model,tag,color)
+        model.AncestryChanged:Connect(function()
+            if not model.Parent then RemoveESP(part,tag); RemoveHighlight(model,tag) end
+        end)
     end)
 end
 
@@ -458,13 +463,13 @@ end
 --  Door — прямой ребёнок комнаты, без dupeDoor внутри
 -- ══════════════════════════════════════════════
 local function HandleDoor(door)
-    -- Ждём один кадр чтобы dupeDoor успел появиться внутри
-    task.defer(function()
+    task.spawn(function()
+        task.wait(0.3) -- ждём чтобы dupeDoor успел загрузиться
         if not door.Parent then return end
         if door:FindFirstChild("dupeDoor") then return end
-        local part=GetPrimaryPart(door)
+        local part = GetPrimaryPart(door)
         if not part then return end
-        if part:FindFirstChild("DoorsESP") then return end -- уже есть
+        if part:FindFirstChild("DoorsESP") then return end
         MakeESP(part,"DoorsESP","✅ ПРАВИЛЬНАЯ",Color3.fromRGB(60,255,60))
         MakeHighlight(door,"DoorsESP",Color3.fromRGB(60,255,60))
         door.AncestryChanged:Connect(function()
@@ -741,8 +746,87 @@ local function SmoothY(fromY, toY, duration, onStep, onDone)
 end
 
 -- ══════════════════════════════════════════════
---  PLAYER ESP
+--  RUSH / AMBUSH — мгновенное обнаружение через событие
 -- ══════════════════════════════════════════════
+local function StartRush(obj)
+    if rushNotif and not notifiedRush[obj] then
+        notifiedRush[obj]=true
+        SendNotif("⚠ ВНИМАНИЕ!","РАШ летит!")
+    end
+    if rushUpEnabled and HumanoidRootPart and not rushActive then
+        rushActive=true
+        rushSavedY=HumanoidRootPart.Position.Y
+        CreatePlatform()
+        SmoothY(rushSavedY, rushSavedY+OFFSET_Y, MOVE_DUR, function(y)
+            if HumanoidRootPart then
+                local p=HumanoidRootPart.Position
+                HumanoidRootPart.CFrame=CFrame.new(p.X,y,p.Z)
+            end
+        end)
+    end
+    -- Следим за исчезновением
+    obj.AncestryChanged:Connect(function()
+        if not obj.Parent and rushActive then
+            rushActive=false
+            if rushUpEnabled and HumanoidRootPart and rushSavedY then
+                local fromY=HumanoidRootPart.Position.Y
+                SmoothY(fromY, rushSavedY, MOVE_DUR, function(y)
+                    if HumanoidRootPart then
+                        local p=HumanoidRootPart.Position
+                        HumanoidRootPart.CFrame=CFrame.new(p.X,y,p.Z)
+                    end
+                end, function() RemovePlatform(); rushSavedY=nil; bypassAntiTp=false end)
+            else
+                bypassAntiTp=false
+            end
+        end
+    end)
+end
+
+local function StartAmbush(obj)
+    if rushNotif and not notifiedRush[obj] then
+        notifiedRush[obj]=true
+        SendNotif("⚠ ВНИМАНИЕ!","АМБУШ летит!")
+    end
+    if ambushDownEnabled and HumanoidRootPart and not ambushActive then
+        ambushActive=true
+        ambushSavedY=HumanoidRootPart.Position.Y
+        CreatePlatform()
+        SmoothY(ambushSavedY, ambushSavedY-OFFSET_Y, MOVE_DUR, function(y)
+            if HumanoidRootPart then
+                local p=HumanoidRootPart.Position
+                HumanoidRootPart.CFrame=CFrame.new(p.X,y,p.Z)
+            end
+        end)
+    end
+    obj.AncestryChanged:Connect(function()
+        if not obj.Parent and ambushActive then
+            ambushActive=false
+            if ambushDownEnabled and HumanoidRootPart and ambushSavedY then
+                local fromY=HumanoidRootPart.Position.Y
+                SmoothY(fromY, ambushSavedY, MOVE_DUR, function(y)
+                    if HumanoidRootPart then
+                        local p=HumanoidRootPart.Position
+                        HumanoidRootPart.CFrame=CFrame.new(p.X,y,p.Z)
+                    end
+                end, function() RemovePlatform(); ambushSavedY=nil; bypassAntiTp=false end)
+            else
+                bypassAntiTp=false
+            end
+        end
+    end)
+end
+
+-- Подписка на появление Rush/Ambush в Workspace
+Workspace.ChildAdded:Connect(function(obj)
+    if obj.Name=="RushMoving"  then StartRush(obj)   end
+    if obj.Name=="AmbushMoving" then StartAmbush(obj) end
+end)
+-- Проверяем уже существующие (если скрипт загружен во время игры)
+for _, obj in ipairs(Workspace:GetChildren()) do
+    if obj.Name=="RushMoving"   then StartRush(obj)   end
+    if obj.Name=="AmbushMoving" then StartAmbush(obj) end
+end
 local function SetPlayerESP(plr, on)
     if plr==Player then return end
     local char=plr.Character; if not char then return end
@@ -797,47 +881,10 @@ RunService.Heartbeat:Connect(function(dt)
         local isAmbush = obj.Name=="AmbushMoving"
 
         if isRush or isAmbush then
-            if rushNotif and not notifiedRush[obj] then
-                notifiedRush[obj]=true
-                SendNotif("⚠ ВНИМАНИЕ!",(isRush and "РАШ" or "АМБУШ").." летит!")
-            end
+            -- Только ESP надпись (движение обрабатывается через ChildAdded)
             if rushAmbushESP then
                 local part=GetPrimaryPart(obj)
                 if part then MakeESP(part,"RushAmbushESP",isRush and "💨 РАШ" or "🌀 АМБУШ",Color3.fromRGB(255,60,60)) end
-            end
-
-            if isRush then
-                rushFound=true
-                if rushUpEnabled and HumanoidRootPart and not rushActive then
-                    rushActive=true
-                    rushSavedY=HumanoidRootPart.Position.Y
-                    local fromY=rushSavedY
-                    local toY=rushSavedY+OFFSET_Y
-                    CreatePlatform()
-                    SmoothY(fromY, toY, MOVE_DUR, function(y)
-                        if HumanoidRootPart then
-                            local p=HumanoidRootPart.Position
-                            HumanoidRootPart.CFrame=CFrame.new(p.X,y,p.Z)
-                        end
-                    end)
-                end
-            end
-
-            if isAmbush then
-                ambushFound=true
-                if ambushDownEnabled and HumanoidRootPart and not ambushActive then
-                    ambushActive=true
-                    ambushSavedY=HumanoidRootPart.Position.Y
-                    local fromY=ambushSavedY
-                    local toY=ambushSavedY-OFFSET_Y
-                    CreatePlatform()
-                    SmoothY(fromY, toY, MOVE_DUR, function(y)
-                        if HumanoidRootPart then
-                            local p=HumanoidRootPart.Position
-                            HumanoidRootPart.CFrame=CFrame.new(p.X,y,p.Z)
-                        end
-                    end)
-                end
             end
         end
 
@@ -850,44 +897,25 @@ RunService.Heartbeat:Connect(function(dt)
             if eyesAntiDmg and HumanoidRootPart then
                 local part=GetPrimaryPart(obj)
                 if part then
-                    local away=(HumanoidRootPart.Position-part.Position).Unit
-                    Camera.CFrame=CFrame.new(Camera.CFrame.Position, Camera.CFrame.Position+away)
+                    -- Полностью блокируем камеру — переводим в Scriptable и смотрим ПРОЧЬ от Eyes
+                    Camera.CameraType = Enum.CameraType.Scriptable
+                    local away = (HumanoidRootPart.Position - part.Position).Unit
+                    -- Смотрим в противоположную от Eyes сторону
+                    local lookAt = Camera.CFrame.Position + away
+                    Camera.CFrame = CFrame.new(Camera.CFrame.Position, lookAt)
                 end
             end
         end
     end
 
-    -- Возврат после Rush
-    if not rushFound and rushActive then
-        rushActive=false
-        if rushUpEnabled and HumanoidRootPart and rushSavedY then
-            local fromY=HumanoidRootPart.Position.Y
-            local toY=rushSavedY
-            SmoothY(fromY, toY, MOVE_DUR, function(y)
-                if HumanoidRootPart then
-                    local p=HumanoidRootPart.Position
-                    HumanoidRootPart.CFrame=CFrame.new(p.X,y,p.Z)
-                end
-            end, function() RemovePlatform(); rushSavedY=nil; bypassAntiTp=false end)
-        else
-            bypassAntiTp=false
+    -- Если Eyes исчезли — возвращаем камеру
+    if eyesAntiDmg and Camera.CameraType == Enum.CameraType.Scriptable then
+        local eyesExists = false
+        for _, obj in ipairs(ws) do
+            if obj.Name == "Eyes" then eyesExists = true; break end
         end
-    end
-
-    -- Возврат после Ambush
-    if not ambushFound and ambushActive then
-        ambushActive=false
-        if ambushDownEnabled and HumanoidRootPart and ambushSavedY then
-            local fromY=HumanoidRootPart.Position.Y
-            local toY=ambushSavedY
-            SmoothY(fromY, toY, MOVE_DUR, function(y)
-                if HumanoidRootPart then
-                    local p=HumanoidRootPart.Position
-                    HumanoidRootPart.CFrame=CFrame.new(p.X,y,p.Z)
-                end
-            end, function() RemovePlatform(); ambushSavedY=nil; bypassAntiTp=false end)
-        else
-            bypassAntiTp=false
+        if not eyesExists then
+            Camera.CameraType = Enum.CameraType.Custom
         end
     end
 
