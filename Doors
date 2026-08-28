@@ -608,66 +608,64 @@ local function HandleDescendant(desc)
 
     -- ── 2 ЭТАЖ ──────────────────────────────
 
-    -- Батарея: Locker_Small > Battery
+    -- Батарея: Assets > Locker_Small > Battery
     if desc.Name=="Locker_Small" and batteryESP then
         local bat=desc:FindFirstChild("Battery",true)
         if bat then MakeItemESP(bat,"BatteryESP","🔋 БАТАРЕЯ",Color3.fromRGB(100,255,100)) end
         return
     end
-    -- GiggleCeiling
+
+    -- GiggleCeiling — в Assets комнаты
     if desc.Name=="GiggleCeiling" and gigglesESP then
         MakeItemESP(desc,"GiggleESP","😂 ГИГГЛ",Color3.fromRGB(255,80,200)); return
     end
-    -- MinesGenerator
+
+    -- MinesGenerator — в Assets комнаты
     if desc.Name=="MinesGenerator" and minesESP then
         MakeItemESP(desc,"MinesGenESP","⚙ ГЕНЕРАТОР",Color3.fromRGB(255,165,0)); return
     end
-    -- _NestHandler > MinesAnchor + Grumbles > Grumbo
-    if desc.Name=="_NestHandler" then
-        if floor2ESPEnabled then
-            for _, child in ipairs(desc:GetChildren()) do
-                if child.Name=="MinesAnchor" then
-                    MakeItemESP(child,"MinesAnchorESP","🔫 АВТОМАТ",Color3.fromRGB(255,50,50))
-                end
-            end
-            desc.ChildAdded:Connect(function(child)
-                if child.Name=="MinesAnchor" and floor2ESPEnabled then
-                    MakeItemESP(child,"MinesAnchorESP","🔫 АВТОМАТ",Color3.fromRGB(255,50,50))
-                end
-            end)
+
+    -- MinesAnchor — прямо внутри _NestHandler (который в комнате/Assets)
+    if desc.Name=="MinesAnchor" and floor2ESPEnabled then
+        MakeItemESP(desc,"MinesAnchorESP","🔫 АВТОМАТ",Color3.fromRGB(255,50,50)); return
+    end
+
+    -- Grumbo — внутри Grumbles > _NestHandler
+    if desc.Name=="Grumbo" and grumboESP then
+        -- Grumbo это Model — ищем любой BasePart внутри для надписи
+        local part = desc:FindFirstChildWhichIsA("BasePart", true)
+        if part then
+            MakeESP(part,"GrumboESP","👾 BIG GRUMBLE",Color3.fromRGB(200,0,255))
         end
-        if grumboESP then
-            local grumbles=desc:FindFirstChild("Grumbles")
-            if grumbles then
-                for _, g in ipairs(grumbles:GetChildren()) do
-                    if g.Name=="Grumbo" then
-                        MakeItemESP(g,"GrumboESP","👾 BIG GRUMBLE",Color3.fromRGB(200,0,255))
-                    end
-                end
-                grumbles.ChildAdded:Connect(function(g)
-                    if g.Name=="Grumbo" and grumboESP then
-                        MakeItemESP(g,"GrumboESP","👾 BIG GRUMBLE",Color3.fromRGB(200,0,255))
-                    end
-                end)
-            end
+        -- Highlight прямо на модель Grumbo
+        if desc:IsA("Model") then
+            MakeHighlight(desc,"GrumboESP",Color3.fromRGB(200,0,255))
         end
+        desc.AncestryChanged:Connect(function()
+            if not desc.Parent then
+                if part then RemoveESP(part,"GrumboESP") end
+                RemoveHighlight(desc,"GrumboESP")
+            end
+        end)
         return
     end
-    -- _DamHandler > Pumps > Flood1 > WaterPump
-    if desc.Name=="_DamHandler" and waterpumpESP then
-        local pumps=desc:FindFirstChild("Pumps")
-        if pumps then
-            for _, flood in ipairs(pumps:GetChildren()) do
-                local wp=flood:FindFirstChild("WaterPump")
-                if wp then
-                    local part=GetPrimaryPart(wp)
-                    if part then
-                        MakeESP(part,"WaterPumpESP","💧 НАСОС",Color3.fromRGB(0,180,255))
-                        MakeHighlight(wp,"WaterPumpESP",Color3.fromRGB(0,180,255))
-                    end
-                end
-            end
+
+    -- Вентили/насосы 100 комнаты — WaterPump или Waterfall
+    if (desc.Name=="WaterPump" or desc.Name=="Waterfall") and waterpumpESP then
+        local target = desc:IsA("Model") and desc or desc.Parent
+        local part = desc:FindFirstChildWhichIsA("BasePart",true) or (desc:IsA("BasePart") and desc)
+        if part then
+            MakeESP(part,"WaterPumpESP","💧 ВЕНТИЛЬ",Color3.fromRGB(0,180,255))
         end
+        if target and target:IsA("Model") then
+            MakeHighlight(target,"WaterPumpESP",Color3.fromRGB(0,180,255))
+        end
+        desc.AncestryChanged:Connect(function()
+            if not desc.Parent then
+                if part then RemoveESP(part,"WaterPumpESP") end
+                if target then RemoveHighlight(target,"WaterPumpESP") end
+            end
+        end)
         return
     end
 
