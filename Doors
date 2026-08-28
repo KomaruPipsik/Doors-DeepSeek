@@ -392,6 +392,95 @@ end)
 -- ── ТЕСТ ─────────────────────────────────────
 AddLabel(pageTest,"Скоро добавим...")
 
+-- ── НОВОЕ ────────────────────────────────────
+local dronesESP      = false
+local dropsESP       = false
+local goldLootESP    = false
+local xrayEnabled    = false
+local freecamEnabled = false
+
+-- Freecam state
+local freecamActive    = false
+local freecamCam       = nil
+local recordingPath    = false
+local recordedPoints   = {}
+local pathTrail        = {} -- визуальные шарики хвостика
+local isPlayingPath    = false
+local pathPlaySpeed    = 16
+local pathPlatform     = nil
+
+local pageNew = AddTab("🆕","НОВОЕ")
+AddLabel(pageNew,"Визуал")
+AddToggle(pageNew,"X-Ray (видеть сквозь стены)", function(s)
+    xrayEnabled = s
+    if not s then
+        -- убираем все xray highlights
+        for _, obj in ipairs(Workspace:GetDescendants()) do
+            local hl = obj:FindFirstChild("_XRayHL")
+            if hl then hl:Destroy() end
+        end
+    end
+end)
+AddToggle(pageNew,"Drones ESP (обводка)", function(s) dronesESP=s end)
+AddToggle(pageNew,"Drops ESP (лазер/ланчбокс/кава/пицца)", function(s) dropsESP=s end)
+AddToggle(pageNew,"Золото (Assets > Loot) ESP", function(s) goldLootESP=s end)
+
+AddLabel(pageNew,"Freecam")
+AddToggle(pageNew,"Freecam (WASD + мышь)", function(s)
+    freecamEnabled = s
+    if s then
+        StartFreecam()
+    else
+        StopFreecam()
+    end
+end)
+AddToggle(pageNew,"Запись пути (хвостик)", function(s)
+    recordingPath = s
+    if s then
+        recordedPoints = {}
+        -- очищаем старые шарики
+        for _, p in ipairs(pathTrail) do pcall(function() p:Destroy() end) end
+        pathTrail = {}
+    end
+end)
+
+-- Кнопка воспроизведения пути
+local playBtn = Instance.new("TextButton")
+playBtn.Size = UDim2.new(1,0,0,33)
+playBtn.BackgroundColor3 = Color3.fromRGB(30,30,40)
+playBtn.Text = "  ▶  Воспроизвести путь"
+playBtn.TextColor3 = Color3.fromRGB(100,200,255)
+playBtn.TextSize = 12
+playBtn.Font = Enum.Font.GothamSemibold
+playBtn.TextXAlignment = Enum.TextXAlignment.Left
+playBtn.AutoButtonColor = false
+playBtn.Parent = pageNew
+Instance.new("UICorner",playBtn).CornerRadius = UDim.new(0,7)
+playBtn.MouseButton1Click:Connect(function()
+    if not isPlayingPath and #recordedPoints > 1 then
+        PlayPath()
+    end
+end)
+
+-- Кнопка остановки пути
+local stopBtn = Instance.new("TextButton")
+stopBtn.Size = UDim2.new(1,0,0,33)
+stopBtn.BackgroundColor3 = Color3.fromRGB(40,20,20)
+stopBtn.Text = "  ■  Стоп"
+stopBtn.TextColor3 = Color3.fromRGB(255,100,100)
+stopBtn.TextSize = 12
+stopBtn.Font = Enum.Font.GothamSemibold
+stopBtn.TextXAlignment = Enum.TextXAlignment.Left
+stopBtn.AutoButtonColor = false
+stopBtn.Parent = pageNew
+Instance.new("UICorner",stopBtn).CornerRadius = UDim.new(0,7)
+stopBtn.MouseButton1Click:Connect(function()
+    isPlayingPath = false
+    if pathPlatform then pathPlatform:Destroy(); pathPlatform=nil end
+end)
+
+AddSlider(pageNew,"Скорость пути",4,50,16,function(v) pathPlaySpeed=v end)
+
 -- ── 2 ЭТАЖ ───────────────────────────────────
 local floor2ESPEnabled   = false
 local gigglesESP         = false
@@ -669,6 +758,25 @@ local function HandleDescendant(desc)
         return
     end
 
+    -- Золото в Loot: Assets > Loot > FloorLootItem > GoldPile
+    if desc.Name=="FloorLootItem" and goldLootESP then
+        local gp = desc:FindFirstChild("GoldPile",true)
+        if gp then
+            local part = GetPrimaryPart(gp) or gp:FindFirstChildWhichIsA("BasePart",true)
+            if part then
+                MakeESP(part,"GoldLootESP","💰 ЗОЛОТО",Color3.fromRGB(255,215,0))
+                MakeHighlight(gp,"GoldLootESP",Color3.fromRGB(255,215,0))
+                desc.AncestryChanged:Connect(function()
+                    if not desc.Parent then
+                        RemoveESP(part,"GoldLootESP")
+                        RemoveHighlight(gp,"GoldLootESP")
+                    end
+                end)
+            end
+        end
+        return
+    end
+
     -- Новые предметы
     TryItemESP(desc)
 end
@@ -928,10 +1036,237 @@ Players.PlayerAdded:Connect(function(plr)
 end)
 
 -- ══════════════════════════════════════════════
+--  X-RAY
+-- ══════════════════════════════════════════════
+local xrayConn = nil
+local function ApplyXRay(obj)
+    if not obj:IsA("BasePart") and not obj:IsA("Model") then return end
+    if obj:FindFirstChild("_XRayHL") then return end
+    -- Пропускаем GUI и прозрачные объекты
+    local hl = Instance.new("Highlight")
+    hl.Name = "_XRayHL"
+    hl.Adornee = obj
+    hl.FillTransparency = 0.85
+    hl.OutlineTransparency = 0.5
+    hl.OutlineColor = Color3.fromRGB(255,255,255)
+    hl.FillColor = Color3.fromRGB(255,255,255)
+    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    hl.Parent = obj
+end
+
+-- ══════════════════════════════════════════════
+--  FREECAM
+-- ══════════════════════════════════════════════
+local freecamSpeed   = 20
+local freecamPitch   = 0
+local freecamYaw     = 0
+local freecamConn    = nil
+local recordConn     = nil
+local RECORD_INTERVAL = 0.15 -- секунд между точками
+
+function StartFreecam()
+    if freecamActive then return end
+    freecamActive = true
+    Camera.CameraType = Enum.CameraType.Scriptable
+    freecamCam = Camera.CFrame
+    freecamPitch = 0
+    freecamYaw   = 0
+
+    -- Скрываем персонажа
+    if Character then
+        for _, p in ipairs(Character:GetDescendants()) do
+            if p:IsA("BasePart") then p.LocalTransparencyModifier = 1 end
+        end
+    end
+
+    freecamConn = RunService.RenderStepped:Connect(function(dt)
+        if not freecamActive then return end
+
+        -- Мышь
+        local md = UserInputService:GetMouseDelta()
+        freecamYaw   = freecamYaw   - md.X * 0.3
+        freecamPitch = math.clamp(freecamPitch - md.Y * 0.3, -89, 89)
+
+        local rot = CFrame.Angles(0, math.rad(freecamYaw), 0)
+            * CFrame.Angles(math.rad(freecamPitch), 0, 0)
+
+        -- WASD движение
+        local move = Vector3.new()
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then move = move + Vector3.new(0,0,-1) end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then move = move + Vector3.new(0,0,1)  end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then move = move + Vector3.new(-1,0,0) end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then move = move + Vector3.new(1,0,0)  end
+        if UserInputService:IsKeyDown(Enum.KeyCode.E) then move = move + Vector3.new(0,1,0)  end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Q) then move = move + Vector3.new(0,-1,0) end
+
+        -- Shift = быстро
+        local spd = freecamSpeed * dt * (UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) and 3 or 1)
+        freecamCam = freecamCam + rot * (move * spd)
+        freecamCam = CFrame.new(freecamCam.Position) * rot
+
+        Camera.CFrame = freecamCam
+
+        -- Блокируем мышь
+        UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+    end)
+
+    -- Запись пути
+    recordConn = RunService.Heartbeat:Connect(function()
+        if not freecamActive then return end
+        if not recordingPath then return end
+        local last = recordedPoints[#recordedPoints]
+        local pos  = freecamCam.Position
+        if not last or (pos - last).Magnitude > 1.5 then
+            table.insert(recordedPoints, pos)
+            -- Добавляем шарик хвостика
+            local ball = Instance.new("Part")
+            ball.Size = Vector3.new(0.4,0.4,0.4)
+            ball.Shape = Enum.PartType.Ball
+            ball.Anchored = true
+            ball.CanCollide = false
+            ball.CastShadow = false
+            ball.Material = Enum.Material.Neon
+            ball.BrickColor = BrickColor.new("Cyan")
+            ball.CFrame = CFrame.new(pos)
+            ball.Parent = Workspace
+            table.insert(pathTrail, ball)
+        end
+    end)
+end
+
+function StopFreecam()
+    if not freecamActive then return end
+    freecamActive = false
+    if freecamConn then freecamConn:Disconnect(); freecamConn=nil end
+    if recordConn  then recordConn:Disconnect();  recordConn=nil  end
+    Camera.CameraType = Enum.CameraType.Custom
+    UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+    -- Возвращаем видимость персонажа
+    if Character then
+        for _, p in ipairs(Character:GetDescendants()) do
+            if p:IsA("BasePart") then p.LocalTransparencyModifier = 0 end
+        end
+    end
+end
+
+-- ══════════════════════════════════════════════
+--  ВОСПРОИЗВЕДЕНИЕ ПУТИ
+-- ══════════════════════════════════════════════
+function PlayPath()
+    if isPlayingPath or #recordedPoints < 2 then return end
+    isPlayingPath = true
+    bypassAntiTp  = true
+
+    -- Платформа под игроком
+    pathPlatform = Instance.new("Part")
+    pathPlatform.Name = "_PathPlatform"
+    pathPlatform.Size = Vector3.new(8,0.4,8)
+    pathPlatform.Anchored = true
+    pathPlatform.CanCollide = true
+    pathPlatform.Transparency = 0.4
+    pathPlatform.BrickColor = BrickColor.new("Bright blue")
+    pathPlatform.Material = Enum.Material.Neon
+    pathPlatform.Parent = Workspace
+
+    task.spawn(function()
+        for i = 1, #recordedPoints do
+            if not isPlayingPath then break end
+            local target = recordedPoints[i]
+            -- Плавно двигаемся к следующей точке
+            local startPos = HumanoidRootPart and HumanoidRootPart.Position or target
+            local dist = (target - startPos).Magnitude
+            local duration = dist / pathPlaySpeed
+            local t0 = tick()
+            while tick() - t0 < duration do
+                if not isPlayingPath then break end
+                local pct = math.clamp((tick()-t0)/math.max(duration,0.01),0,1)
+                local pos = startPos:Lerp(target, pct)
+                if HumanoidRootPart then
+                    HumanoidRootPart.CFrame = CFrame.new(pos)
+                end
+                if pathPlatform then
+                    pathPlatform.CFrame = CFrame.new(pos.X, pos.Y-3.2, pos.Z)
+                end
+                RunService.Heartbeat:Wait()
+            end
+            if HumanoidRootPart then
+                HumanoidRootPart.CFrame = CFrame.new(target)
+            end
+        end
+        isPlayingPath = false
+        bypassAntiTp  = false
+        if pathPlatform then pathPlatform:Destroy(); pathPlatform=nil end
+        -- Убираем хвостик
+        for _, p in ipairs(pathTrail) do pcall(function() p:Destroy() end) end
+        pathTrail = {}
+    end)
+end
+
+-- ══════════════════════════════════════════════
+--  DROPS ESP
+-- ══════════════════════════════════════════════
+local DROPS_MAP = {
+    LaserPointer = "🔴 ЛАЗЕР",
+    Leftovers    = "🍱 ЛАНЧБОКС",
+    FishFlakes   = "🐟 КАВА",
+    Pizza        = "🍕 ПИЦЦА",
+}
+local DROPS_COLOR = {
+    LaserPointer = Color3.fromRGB(255,50,50),
+    Leftovers    = Color3.fromRGB(255,200,80),
+    FishFlakes   = Color3.fromRGB(80,200,255),
+    Pizza        = Color3.fromRGB(255,140,0),
+}
+
+local function HandleDrop(drop)
+    if not dropsESP then return end
+    for _, child in ipairs(drop:GetChildren()) do
+        local label = DROPS_MAP[child.Name]
+        if label then
+            local color = DROPS_COLOR[child.Name] or Color3.fromRGB(255,255,255)
+            MakeItemESP(child,"DropESP_"..child.Name, label, color)
+        end
+    end
+    drop.ChildAdded:Connect(function(child)
+        if not dropsESP then return end
+        local label = DROPS_MAP[child.Name]
+        if label then
+            local color = DROPS_COLOR[child.Name] or Color3.fromRGB(255,255,255)
+            MakeItemESP(child,"DropESP_"..child.Name, label, color)
+        end
+    end)
+end
+
+-- Следим за Drops в Workspace
+Workspace.ChildAdded:Connect(function(obj)
+    if obj.Name=="Drops" then HandleDrop(obj) end
+    if obj.Name=="Drone" and dronesESP then
+        MakeHighlight(obj,"DroneESP",Color3.fromRGB(150,150,150))
+        obj.AncestryChanged:Connect(function()
+            if not obj.Parent then RemoveHighlight(obj,"DroneESP") end
+        end)
+    end
+end)
+Workspace.DescendantAdded:Connect(function(obj)
+    if obj.Name=="Drone" and dronesESP then
+        MakeHighlight(obj,"DroneESP",Color3.fromRGB(150,150,150))
+        obj.AncestryChanged:Connect(function()
+            if not obj.Parent then RemoveHighlight(obj,"DroneESP") end
+        end)
+    end
+end)
+-- Уже существующие
+for _, obj in ipairs(Workspace:GetChildren()) do
+    if obj.Name=="Drops" then HandleDrop(obj) end
+end
+
+-- ══════════════════════════════════════════════
 --  MAIN LOOP
 -- ══════════════════════════════════════════════
 local lastPos  = Vector3.new()
 local scanTick = 0
+
+local xrayScanTick = 0
 
 RunService.RenderStepped:Connect(function()
     -- FOV через RenderStepped — применяется после рендера, игра не перебивает
@@ -989,6 +1324,24 @@ RunService.Heartbeat:Connect(function(dt)
         end
         if not eyesExists then
             Camera.CameraType = Enum.CameraType.Custom
+        end
+    end
+
+    -- X-Ray — раз в 2 сек сканируем новые объекты
+    if xrayEnabled then
+        if not xrayScanTick then xrayScanTick = 0 end
+        xrayScanTick = xrayScanTick + dt
+        if xrayScanTick > 2 then
+            xrayScanTick = 0
+            if currentRooms then
+                for _, room in ipairs(currentRooms:GetChildren()) do
+                    for _, part in ipairs(room:GetDescendants()) do
+                        if part:IsA("BasePart") and not part:FindFirstChild("_XRayHL") then
+                            ApplyXRay(part)
+                        end
+                    end
+                end
+            end
         end
     end
 
