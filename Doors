@@ -102,6 +102,8 @@ local pathPlatform     = nil
 -- forward declaration
 local HandleDrop
 local HandleDrone
+local ScanWaterPools
+local SubscribeRoom
 
 -- ══════════════════════════════════════════════
 --  GUI
@@ -466,12 +468,14 @@ end)
 AddLabel(pageTest,"Скоро добавим...")
 
 -- ── АРХИВЫ ───────────────────────────────────
+local waterPoolEnabled = false
+local waterPoolParts   = {} -- все созданные парты над пулами
+
 local pageNew = AddTab("📦","АРХИВЫ")
 AddLabel(pageNew,"Предметы из ивентов")
 AddToggle(pageNew,"Drones ESP (обводка)", function(s)
     dronesESP = s
     if s then
-        -- Ищем существующих
         for _, obj in ipairs(Workspace:GetDescendants()) do
             if obj.Name=="Drone" then
                 MakeHighlight(obj,"DroneESP",Color3.fromRGB(180,180,180))
@@ -481,6 +485,14 @@ AddToggle(pageNew,"Drones ESP (обводка)", function(s)
         for _, obj in ipairs(Workspace:GetDescendants()) do
             RemoveHighlight(obj,"DroneESP")
         end
+    end
+end)
+AddToggle(pageNew,"DronesStampede — уведомление (Стада)", function(s)
+    -- просто флаг, логика в Workspace.ChildAdded ниже
+    -- при включении проверяем уже существующий
+    if s then
+        local st = Workspace:FindFirstChild("DronesStampede", true)
+        if st then SendNotif("🦬 СТАДА!", "DronesStampede уже в мире!") end
     end
 end)
 AddToggle(pageNew,"Drops ESP (лазер/ланчбокс/кава/пицца)", function(s)
@@ -494,7 +506,6 @@ end)
 AddToggle(pageNew,"Золото (Loot) ESP", function(s)
     goldLootESP = s
     if s then
-        -- Сканируем уже загруженные комнаты
         ScanRooms(function(d)
             if d.Name=="FloorLootItem" then
                 local gp = d:FindFirstChild("GoldPile",true)
@@ -508,7 +519,6 @@ AddToggle(pageNew,"Золото (Loot) ESP", function(s)
             end
         end)
     else
-        -- Убираем
         ScanRooms(function(d)
             if d.Name=="FloorLootItem" then
                 local gp = d:FindFirstChild("GoldPile",true)
@@ -518,6 +528,20 @@ AddToggle(pageNew,"Золото (Loot) ESP", function(s)
                 end
             end
         end)
+    end
+end)
+AddLabel(pageNew,"Вода (архив-контент)")
+AddToggle(pageNew,"Water пулы — маркер над водой", function(s)
+    waterPoolEnabled = s
+    if not s then
+        -- Убираем все маркеры
+        for _, p in ipairs(waterPoolParts) do
+            pcall(function() p:Destroy() end)
+        end
+        waterPoolParts = {}
+    else
+        -- Сканируем уже загруженные комнаты
+        ScanWaterPools()
     end
 end)
 
@@ -901,7 +925,7 @@ end
 -- ══════════════════════════════════════════════
 --  ROOM SUBSCRIPTION
 -- ══════════════════════════════════════════════
-local function SubscribeRoom(room)
+SubscribeRoom = function(room)
     -- Двери — прямые дети
     for _, child in ipairs(room:GetChildren()) do
         if child.Name=="Door" and child:IsA("Model") and doorsESPEnabled then HandleDoor(child) end
@@ -909,10 +933,27 @@ local function SubscribeRoom(room)
     room.ChildAdded:Connect(function(child)
         if child.Name=="Door" and child:IsA("Model") and doorsESPEnabled then HandleDoor(child) end
         HandleDescendant(child)
+        -- Water
+        if child.Name=="Water" and waterPoolEnabled then HandleWater(child) end
+        if child.Name=="Assets" then
+            child.ChildAdded:Connect(function(asset)
+                if asset.Name=="Water" and waterPoolEnabled then HandleWater(asset) end
+            end)
+            for _, asset in ipairs(child:GetChildren()) do
+                if asset.Name=="Water" and waterPoolEnabled then HandleWater(asset) end
+            end
+        end
     end)
     -- Всё остальное
     for _, desc in ipairs(room:GetDescendants()) do HandleDescendant(desc) end
     room.DescendantAdded:Connect(HandleDescendant)
+    -- Water уже в комнате
+    local assets = room:FindFirstChild("Assets")
+    if assets then
+        for _, obj in ipairs(assets:GetChildren()) do
+            if obj.Name=="Water" and waterPoolEnabled then HandleWater(obj) end
+        end
+    end
 end
 
 if currentRooms then
@@ -1300,20 +1341,102 @@ HandleDrone = function(obj)
     end)
 end
 
--- Следим за Drops и Drones в Workspace
+-- Следим за Drops в Workspace
 Workspace.ChildAdded:Connect(function(obj)
     if obj.Name=="Drops" then HandleDrop(obj) end
 end)
+
+-- ══════════════════════════════════════════════
+--  WATER POOLS — маркер над каждым пулом
+-- ══════════════════════════════════════════════
+local dronesStampedeNotif = true -- глобальный флаг уведомления
+
+local function MakePoolMarker(pool)
+    if not pool or not pool:IsA("BasePart") then return end
+    if pool:FindFirstChild("_PoolMarker") then return end
+
+    -- Размер маркера = размер пула по X и Z, высота 2
+    local size = pool.Size
+    local marker = Instance.new("Part")
+    marker.Name = "_PoolMarker"
+    marker.Size = Vector3.new(size.X, 2, size.Z)
+    marker.Anchored = true
+    marker.CanCollide = false
+    marker.CastShadow = false
+    marker.Transparency = 0.4
+    marker.BrickColor = BrickColor.new("Bright blue")
+    marker.Material = Enum.Material.Neon
+    -- Позиция: над пулом на 1 блок (чтобы маркер был прямо над водой)
+    marker.CFrame = CFrame.new(pool.Position + Vector3.new(0, size.Y/2 + 1, 0))
+    marker.Parent = Workspace
+    table.insert(waterPoolParts, marker)
+
+    -- Надпись над маркером
+    local bill = Instance.new("BillboardGui")
+    bill.Size = UDim2.new(0,120,0,30)
+    bill.AlwaysOnTop = true
+    bill.StudsOffset = Vector3.new(0,2,0)
+    bill.Adornee = marker
+    bill.Parent = marker
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1,0,1,0)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = "💧 " .. pool.Name
+    lbl.TextColor3 = Color3.fromRGB(100,220,255)
+    lbl.TextStrokeTransparency = 0
+    lbl.TextSize = 13
+    lbl.Font = Enum.Font.GothamBold
+    lbl.Parent = bill
+
+    -- Убираем маркер если пул исчезает
+    pool.AncestryChanged:Connect(function()
+        if not pool.Parent then
+            pcall(function() marker:Destroy() end)
+        end
+    end)
+end
+
+local function HandleWater(waterModel)
+    if not waterPoolEnabled then return end
+    -- Pool1 .. Pool10
+    for i = 1, 10 do
+        local pool = waterModel:FindFirstChild("Pool"..i)
+        if pool and pool:IsA("BasePart") then
+            MakePoolMarker(pool)
+        end
+    end
+    -- Следим за новыми пулами
+    waterModel.ChildAdded:Connect(function(child)
+        if not waterPoolEnabled then return end
+        if child.Name:match("^Pool%d+$") and child:IsA("BasePart") then
+            MakePoolMarker(child)
+        end
+    end)
+end
+
+function ScanWaterPools()
+    if not currentRooms then return end
+    for _, room in ipairs(currentRooms:GetChildren()) do
+        local assets = room:FindFirstChild("Assets")
+        if assets then
+            for _, obj in ipairs(assets:GetChildren()) do
+                if obj.Name == "Water" then HandleWater(obj) end
+            end
+        end
+        local water = room:FindFirstChild("Water")
+        if water then HandleWater(water) end
+    end
+end
+
+-- ══════════════════════════════════════════════
+--  DRONESSSTAMPEDE — уведомление
+-- ══════════════════════════════════════════════
 Workspace.DescendantAdded:Connect(function(obj)
-    if obj.Name=="Drone" then HandleDrone(obj) end
+    if obj.Name == "DronesStampede" then
+        SendNotif("🦬 СТАДА!", "Появилось стадо дронов!")
+    end
+    if obj.Name == "Drone" then HandleDrone(obj) end
 end)
--- Уже существующие
-for _, obj in ipairs(Workspace:GetChildren()) do
-    if obj.Name=="Drops" then HandleDrop(obj) end
-end
-for _, obj in ipairs(Workspace:GetDescendants()) do
-    if obj.Name=="Drone" then HandleDrone(obj) end
-end
 
 -- ══════════════════════════════════════════════
 --  MAIN LOOP
