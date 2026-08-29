@@ -362,8 +362,6 @@ AddToggle(pageESP,"Предметы (стол/стул) ESP",       function(s) 
 AddToggle(pageESP,"Ловушки (90-99) ESP",            function(s) snareESP=s end)
 AddToggle(pageESP,"Рычаги (комн. 100) ESP",         function(s) polesESP=s end)
 
-local almaAntiLook = false
-
 -- ── МОНСТРЫ ──────────────────────────────────
 AddLabel(pageMobs,"Rush / Ambush")
 AddToggle(pageMobs,"Rush & Ambush ESP",             function(s) rushAmbushESP=s end)
@@ -835,13 +833,10 @@ local function HandleDescendant(desc)
 
     -- Золото в Loot: Assets > Loot > FloorLootItem > GoldPile
     if desc.Name=="FloorLootItem" and goldLootESP then
-        task.spawn(function()
-            task.wait(0.2)
-            if not desc.Parent then return end
-            local gp = desc:FindFirstChild("GoldPile",true)
-            if not gp then return end
+        local gp = desc:FindFirstChild("GoldPile",true)
+        if gp then
             local part = GetPrimaryPart(gp) or gp:FindFirstChildWhichIsA("BasePart",true)
-            if part and not part:FindFirstChild("GoldLootESP") then
+            if part then
                 MakeESP(part,"GoldLootESP","💰 ЗОЛОТО",Color3.fromRGB(255,215,0))
                 MakeHighlight(gp,"GoldLootESP",Color3.fromRGB(255,215,0))
                 desc.AncestryChanged:Connect(function()
@@ -851,22 +846,10 @@ local function HandleDescendant(desc)
                     end
                 end)
             end
-        end)
+        end
         return
     end
-    -- Также ловим GoldPile напрямую внутри Loot
-    if desc.Name=="GoldPile" and goldLootESP then
-        local part = GetPrimaryPart(desc) or desc:FindFirstChildWhichIsA("BasePart",true)
-        if part and not part:FindFirstChild("GoldLootESP") then
-            MakeESP(part,"GoldLootESP","💰 ЗОЛОТО",Color3.fromRGB(255,215,0))
-            MakeHighlight(desc,"GoldLootESP",Color3.fromRGB(255,215,0))
-            desc.AncestryChanged:Connect(function()
-                if not desc.Parent then
-                    RemoveESP(part,"GoldLootESP")
-                    RemoveHighlight(desc,"GoldLootESP")
-                end
-            end)
-        end
+
     -- Новые предметы
     TryItemESP(desc)
 end
@@ -1500,33 +1483,24 @@ RunService.Heartbeat:Connect(function(dt)
             if eyesAntiDmg and HumanoidRootPart then
                 local part=GetPrimaryPart(obj)
                 if part then
+                    -- Полностью блокируем камеру — переводим в Scriptable и смотрим ПРОЧЬ от Eyes
                     Camera.CameraType = Enum.CameraType.Scriptable
                     local away = (HumanoidRootPart.Position - part.Position).Unit
-                    Camera.CFrame = CFrame.new(Camera.CFrame.Position, Camera.CFrame.Position + away)
+                    -- Смотрим в противоположную от Eyes сторону
+                    local lookAt = Camera.CFrame.Position + away
+                    Camera.CFrame = CFrame.new(Camera.CFrame.Position, lookAt)
                 end
-            end
-        end
-
-        -- Alma — анти-взгляд (как Eyes)
-        if obj.Name=="Alma" and almaAntiLook and HumanoidRootPart then
-            local part = GetPrimaryPart(obj)
-            if part then
-                Camera.CameraType = Enum.CameraType.Scriptable
-                local away = (HumanoidRootPart.Position - part.Position).Unit
-                Camera.CFrame = CFrame.new(Camera.CFrame.Position, Camera.CFrame.Position + away)
             end
         end
     end
 
-    -- Если Eyes и Alma исчезли — возвращаем камеру
-    if (eyesAntiDmg or almaAntiLook) and Camera.CameraType == Enum.CameraType.Scriptable then
-        local blockCam = false
+    -- Если Eyes исчезли — возвращаем камеру
+    if eyesAntiDmg and Camera.CameraType == Enum.CameraType.Scriptable then
+        local eyesExists = false
         for _, obj in ipairs(ws) do
-            if (obj.Name=="Eyes" and eyesAntiDmg) or (obj.Name=="Alma" and almaAntiLook) then
-                blockCam = true; break
-            end
+            if obj.Name == "Eyes" then eyesExists = true; break end
         end
-        if not blockCam then
+        if not eyesExists then
             Camera.CameraType = Enum.CameraType.Custom
         end
     end
