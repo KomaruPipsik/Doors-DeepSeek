@@ -85,6 +85,24 @@ end
 RemoveFog()
 game.Lighting:GetPropertyChangedSignal("FogEnd"):Connect(RemoveFog)
 
+local dronesESP      = false
+local dropsESP       = false
+local goldLootESP    = false
+local xrayEnabled    = false
+local freecamEnabled = false
+local freecamActive    = false
+local freecamCam       = nil
+local recordingPath    = false
+local recordedPoints   = {}
+local pathTrail        = {}
+local isPlayingPath    = false
+local pathPlaySpeed    = 16
+local pathPlatform     = nil
+
+-- forward declaration
+local HandleDrop
+local HandleDrone
+
 -- ══════════════════════════════════════════════
 --  GUI
 -- ══════════════════════════════════════════════
@@ -448,22 +466,6 @@ end)
 AddLabel(pageTest,"Скоро добавим...")
 
 -- ── АРХИВЫ ───────────────────────────────────
-local dronesESP      = false
-local dropsESP       = false
-local goldLootESP    = false
-local xrayEnabled    = false
-local freecamEnabled = false
-
--- Freecam state
-local freecamActive    = false
-local freecamCam       = nil
-local recordingPath    = false
-local recordedPoints   = {}
-local pathTrail        = {}
-local isPlayingPath    = false
-local pathPlaySpeed    = 16
-local pathPlatform     = nil
-
 local pageNew = AddTab("📦","АРХИВЫ")
 AddLabel(pageNew,"Предметы из ивентов")
 AddToggle(pageNew,"Drones ESP (обводка)", function(s)
@@ -491,6 +493,32 @@ AddToggle(pageNew,"Drops ESP (лазер/ланчбокс/кава/пицца)",
 end)
 AddToggle(pageNew,"Золото (Loot) ESP", function(s)
     goldLootESP = s
+    if s then
+        -- Сканируем уже загруженные комнаты
+        ScanRooms(function(d)
+            if d.Name=="FloorLootItem" then
+                local gp = d:FindFirstChild("GoldPile",true)
+                if gp then
+                    local part = GetPrimaryPart(gp) or gp:FindFirstChildWhichIsA("BasePart",true)
+                    if part then
+                        MakeESP(part,"GoldLootESP","💰 ЗОЛОТО",Color3.fromRGB(255,215,0))
+                        MakeHighlight(gp,"GoldLootESP",Color3.fromRGB(255,215,0))
+                    end
+                end
+            end
+        end)
+    else
+        -- Убираем
+        ScanRooms(function(d)
+            if d.Name=="FloorLootItem" then
+                local gp = d:FindFirstChild("GoldPile",true)
+                if gp then
+                    RemoveESP(GetPrimaryPart(gp),"GoldLootESP")
+                    RemoveHighlight(gp,"GoldLootESP")
+                end
+            end
+        end)
+    end
 end)
 
 -- ── 2 ЭТАЖ ───────────────────────────────────
@@ -1056,9 +1084,6 @@ Players.PlayerAdded:Connect(function(plr)
     end)
 end)
 
--- forward declaration для HandleDrop (объявляется ниже в DROPS ESP секции)
-local HandleDrop
-
 -- ══════════════════════════════════════════════
 --  X-RAY
 -- ══════════════════════════════════════════════
@@ -1266,7 +1291,7 @@ HandleDrop = function(drop)
     drop.ChildAdded:Connect(tryChild)
 end
 
-local function HandleDrone(obj)
+HandleDrone = function(obj)
     if not dronesESP then return end
     if obj:FindFirstChild("DroneESP_HL") then return end
     MakeHighlight(obj,"DroneESP",Color3.fromRGB(180,180,180))
