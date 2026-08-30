@@ -34,7 +34,7 @@ local F={
     drones=false,drops=false,gold=false,waterPool=false,
     cooler=false,scribbles=false,ransom=false,stampede=false,
     bash=false,bashNotif=false,
-    radiusESP=false,radiusVal=150,
+    radiusESP=false,radiusVal=150,timerLever=false,
     battery=false,hole=false,giggle=false,mines=false,mines2=false,grumbo=false,pump=false,
     follow=false,followSpd=16,
 }
@@ -309,6 +309,27 @@ end)
 
 -- Test tab (секрет /200)
 Lbl(pTest,"Напишите /200 в чат")
+Lbl(pTest,"Инструменты")
+Tog(pTest,"TimerLever ESP (таймер)",function(s)
+    F.timerLever=s
+    if s and currentRooms then
+        for _,room in ipairs(currentRooms:GetChildren()) do
+            for _,desc in ipairs(room:GetDescendants()) do
+                if desc.Name=="TimerLever" then
+                    ItemESP(desc,"TimerESP","⏱ ТАЙМЕР",Color3.fromRGB(255,200,0))
+                end
+            end
+        end
+    elseif not s and currentRooms then
+        for _,room in ipairs(currentRooms:GetChildren()) do
+            for _,desc in ipairs(room:GetDescendants()) do
+                if desc.Name=="TimerLever" then
+                    RemESP(GPP(desc),"TimerESP"); RemHL(desc,"TimerESP")
+                end
+            end
+        end
+    end
+end)
 
 -- Floor2 tab
 Lbl(pFloor2,"Предметы")
@@ -592,6 +613,9 @@ local function HandleDesc(desc)
     end
     if desc.Name=="ArchivesWaterCooler" and F.cooler then
         ItemESP(desc,"CoolerESP","🧊 КУЛЬЕР",Color3.fromRGB(100,200,255)); return
+    end
+    if desc.Name=="TimerLever" and F.timerLever then
+        ItemESP(desc,"TimerESP","⏱ ТАЙМЕР",Color3.fromRGB(255,200,0)); return
     end
     if desc.Name=="FloorLootItem" and F.gold then
         task.spawn(function()
