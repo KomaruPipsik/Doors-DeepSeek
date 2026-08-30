@@ -448,45 +448,88 @@ local function HandleDoor(door)
 end
 
 -- ── ITEMS TABLE ────────────────────────────────────────
--- Все предметы лежат в: комната > Assets > Loot > FloorLootItem > <модель>
--- Ключи таблицы — имя модели ВНУТРИ FloorLootItem
-local LOOT_ITEMS={
-    {name="Handle",   parent="Table",              label="🩹 ПЛАСТЫРЬ",  col=Color3.fromRGB(255,180,100)},
-    {name="Candle",   parent="Table",              label="🕯 СВЕЧА",     col=Color3.fromRGB(255,240,150), part="Handle"},
-    {name="Lighter",  parent="RolltopContainer",   label="🔥 ЗАЖИГАЛКА", col=Color3.fromRGB(255,120,30),  part="Main"},
-    {name="Vitamins", parent="RolltopContainer",   label="💊 ВИТАМИНЫ",  col=Color3.fromRGB(160,255,80),  part="Main"},
-    {name="Smoothive",parent="SmoothieSpawner",    label="🥤 СОК",       col=Color3.fromRGB(100,220,100), part="Main"},
-    {name="Main",     parent="AlarmClock",         label="⏰ БУДИЛЬНИК", col=Color3.fromRGB(200,200,255)},
+-- путь: комната > Assets > Loot > FloorLootItem > <контейнер> > <парт>
+-- контейнер — это модель типа Table, RolltopContainer и т.д.
+local ITEM_CONTAINERS={
+    -- [имя контейнера] = {label, color, partName (nil = любой BasePart)}
+    Table           = nil, -- разбираем отдельно (Handle=пластырь, Candle=свеча)
+    RolltopContainer= nil, -- Lighter, Vitamins
+    SmoothieSpawner = {"🥤 СОК",       Color3.fromRGB(100,220,100), "Main"},
+    AlarmClock      = {"⏰ БУДИЛЬНИК", Color3.fromRGB(200,200,255), "Main"},
 }
--- Lookup по имени модели
-local LOOT_BY_NAME={}
-for _,r in ipairs(LOOT_ITEMS) do
-    if not LOOT_BY_NAME[r.name] then LOOT_BY_NAME[r.name]={} end
-    table.insert(LOOT_BY_NAME[r.name],r)
-end
+-- Специальные случаи внутри Table и RolltopContainer
+local TABLE_ITEMS={
+    Handle  ={"🩹 ПЛАСТЫРЬ",  Color3.fromRGB(255,180,100), nil},
+    Candle  ={"🕯 СВЕЧА",     Color3.fromRGB(255,240,150), "Handle"},
+}
+local ROLLTOP_ITEMS={
+    Lighter ={"🔥 ЗАЖИГАЛКА", Color3.fromRGB(255,120,30),  "Main"},
+    Vitamins={"💊 ВИТАМИНЫ",  Color3.fromRGB(160,255,80),  "Main"},
+}
 
--- Обрабатываем FloorLootItem — ищем все известные предметы внутри
-local function HandleFloorLootItem(item)
+local function HandleFloorLootItem(fli)
     if not F.items then return end
     task.spawn(function()
-        task.wait(0.2)
-        if not item.Parent then return end
-        for _,child in ipairs(item:GetDescendants()) do
-            local rules=LOOT_BY_NAME[child.Name]
-            if rules then
-                for _,r in ipairs(rules) do
-                    local tgt=r.part and child:FindFirstChild(r.part) or child
-                    local part=GPP(tgt) or (tgt:IsA("BasePart") and tgt)
-                    if part and not part:FindFirstChild("LootESP_"..r.label) then
-                        MakeESP(part,"LootESP_"..r.label,r.label,r.col)
-                        MakeHL(child,"LootESP_"..r.label,r.col)
-                        child.AncestryChanged:Connect(function()
-                            if not child.Parent then
-                                RemESP(part,"LootESP_"..r.label)
-                                RemHL(child,"LootESP_"..r.label)
-                            end
+        task.wait(0.3)
+        if not fli or not fli.Parent then return end
+        for _,container in ipairs(fli:GetChildren()) do
+            -- Table
+            if container.Name=="Table" then
+                for _,ch in ipairs(container:GetChildren()) do
+                    local info=TABLE_ITEMS[ch.Name]
+                    if info then
+                        local part=(info[3] and ch:FindFirstChild(info[3])) or GPP(ch) or ch
+                        local tag="LootESP_"..ch.Name
+                        if part and not part:FindFirstChild(tag) then
+                            MakeESP(part,tag,info[1],info[2])
+                            MakeHL(ch:IsA("Model") and ch or fli, tag, info[2])
+                            fli.AncestryChanged:Connect(function()
+                                if not fli.Parent then RemESP(part,tag); RemHL(ch,tag) end
+                            end)
+                        end
+                    end
+                end
+            -- RolltopContainer
+            elseif container.Name=="RolltopContainer" then
+                for _,ch in ipairs(container:GetChildren()) do
+                    local info=ROLLTOP_ITEMS[ch.Name]
+                    if info then
+                        local part=(info[3] and ch:FindFirstChild(info[3])) or GPP(ch) or ch
+                        local tag="LootESP_"..ch.Name
+                        if part and not part:FindFirstChild(tag) then
+                            MakeESP(part,tag,info[1],info[2])
+                            MakeHL(ch:IsA("Model") and ch or fli, tag, info[2])
+                            fli.AncestryChanged:Connect(function()
+                                if not fli.Parent then RemESP(part,tag); RemHL(ch,tag) end
+                            end)
+                        end
+                    end
+                end
+            -- SmoothieSpawner
+            elseif container.Name=="SmoothieSpawner" then
+                local info={"🥤 СОК",Color3.fromRGB(100,220,100),"Main"}
+                local ch=container:FindFirstChild("Smoothive")
+                if ch then
+                    local part=ch:FindFirstChild("Main") or GPP(ch)
+                    local tag="LootESP_Smoothive"
+                    if part and not part:FindFirstChild(tag) then
+                        MakeESP(part,tag,info[1],info[2])
+                        MakeHL(ch,tag,info[2])
+                        fli.AncestryChanged:Connect(function()
+                            if not fli.Parent then RemESP(part,tag); RemHL(ch,tag) end
                         end)
                     end
+                end
+            -- AlarmClock
+            elseif container.Name=="AlarmClock" then
+                local part=container:FindFirstChild("Main") or GPP(container)
+                local tag="LootESP_AlarmClock"
+                if part and not part:FindFirstChild(tag) then
+                    MakeESP(part,tag,"⏰ БУДИЛЬНИК",Color3.fromRGB(200,200,255))
+                    MakeHL(container,tag,Color3.fromRGB(200,200,255))
+                    fli.AncestryChanged:Connect(function()
+                        if not fli.Parent then RemESP(part,tag); RemHL(container,tag) end
+                    end)
                 end
             end
         end
@@ -602,7 +645,16 @@ function refreshKeysESP() ScanRooms(function(d) if d.Name=="KeyObtain" then if F
 function refreshLeverESP() ScanRooms(function(d) if d.Name=="LeverForGate" then local p=GPP(d) if F.lever then if p then MakeESP(p,"LeverESP","🔧 РЫЧАГ",Color3.fromRGB(255,255,0)) end MakeHL(d,"LeverESP",Color3.fromRGB(255,255,0)) else RemESP(p,"LeverESP"); RemHL(d,"LeverESP") end end end) end
 function refreshBooksESP() ScanRooms(function(d) if d.Name=="LiveHintBook" then if F.books then ItemESP(d,"BookESP","📖 КНИГА",Color3.fromRGB(0,210,255)) else RemHL(d,"BookESP") end end end) end
 function refreshCrucifixESP() ScanRooms(function(d) if d.Name=="CrucifixWall" then if F.crucifix then ItemESP(d,"CrucifixESP","✝ КРЕСТ",Color3.fromRGB(255,200,50)) else RemHL(d,"CrucifixESP") end end end) end
-function refreshItemsESP() ScanRooms(TryItem) end
+function refreshItemsESP()
+    if not currentRooms then return end
+    for _,room in ipairs(currentRooms:GetChildren()) do
+        local assets=room:FindFirstChild("Assets"); if not assets then continue end
+        local loot=assets:FindFirstChild("Loot"); if not loot then continue end
+        for _,fli in ipairs(loot:GetChildren()) do
+            if fli.Name=="FloorLootItem" then HandleFloorLootItem(fli) end
+        end
+    end
+end
 
 -- ── ROOM SUBSCRIPTION ──────────────────────────────────
 SubscribeRoom=function(room)
@@ -615,6 +667,7 @@ SubscribeRoom=function(room)
         HandleDesc(ch)
     end)
     room.DescendantAdded:Connect(HandleDesc)
+    -- Следим за Water
     local assets=room:FindFirstChild("Assets")
     if assets then
         for _,o in ipairs(assets:GetChildren()) do
@@ -623,6 +676,28 @@ SubscribeRoom=function(room)
         assets.ChildAdded:Connect(function(o)
             if o.Name=="Water" and F.waterPool then HandleWater(o) end
         end)
+        -- Следим за Loot > FloorLootItem
+        local loot=assets:FindFirstChild("Loot")
+        if loot then
+            for _,fli in ipairs(loot:GetChildren()) do
+                if fli.Name=="FloorLootItem" then HandleFloorLootItem(fli) end
+            end
+            loot.ChildAdded:Connect(function(fli)
+                if fli.Name=="FloorLootItem" then HandleFloorLootItem(fli) end
+            end)
+        else
+            -- Loot ещё не появился — ждём
+            assets.ChildAdded:Connect(function(child)
+                if child.Name=="Loot" then
+                    child.ChildAdded:Connect(function(fli)
+                        if fli.Name=="FloorLootItem" then HandleFloorLootItem(fli) end
+                    end)
+                    for _,fli in ipairs(child:GetChildren()) do
+                        if fli.Name=="FloorLootItem" then HandleFloorLootItem(fli) end
+                    end
+                end
+            end)
+        end
     end
 end
 
@@ -1071,22 +1146,30 @@ RunService.Heartbeat:Connect(function(dt)
                 end
             end
         end
-        if obj.Name=="Alma" and F.almaAnti and HRP then
-            local p=GPP(obj)
-            if p then needBlockCam=true
+    end
+
+    -- Alma ищем рекурсивно во всём Workspace (она не обязательно прямой ребёнок)
+    if F.almaAnti and HRP then
+        local alma=Workspace:FindFirstChild("Alma",true)
+        if alma then
+            local p=GPP(alma)
+            if p then
                 Camera.CameraType=Enum.CameraType.Scriptable
                 local away=(HRP.Position-p.Position).Unit
                 Camera.CFrame=CFrame.new(Camera.CFrame.Position,Camera.CFrame.Position+away)
             end
+        elseif Camera.CameraType==Enum.CameraType.Scriptable and not fcActive and not F.eyesAnti then
+            -- Alma исчезла — возвращаем камеру
+            local eyesExist=Workspace:FindFirstChild("Eyes",true)
+            if not eyesExist then Camera.CameraType=Enum.CameraType.Custom end
         end
-        if not needBlockCam and (F.eyesAnti or F.almaAnti) then
-            local hasBlock=false
-            for _,o in ipairs(ws) do
-                if (o.Name=="Eyes" and F.eyesAnti) or (o.Name=="Alma" and F.almaAnti) then hasBlock=true; break end
-            end
-            if not hasBlock and Camera.CameraType==Enum.CameraType.Scriptable and not fcActive then
-                Camera.CameraType=Enum.CameraType.Custom
-            end
+    end
+
+    -- Eyes исчезли — возвращаем камеру
+    if F.eyesAnti and not F.almaAnti then
+        local eyesExist=Workspace:FindFirstChild("Eyes",true)
+        if not eyesExist and Camera.CameraType==Enum.CameraType.Scriptable and not fcActive then
+            Camera.CameraType=Enum.CameraType.Custom
         end
     end
 
@@ -1118,17 +1201,155 @@ RunService.Heartbeat:Connect(function(dt)
     end
 end)
 
--- ── RADIUS ESP (в разделе Игроки) ────────────────────
-Lbl(pPlayers,"Радиус ESP")
-Tog(pPlayers,"ESP только в радиусе",function(s)
-    F.radiusESP=s
-    if not s then
-        -- убираем все радиус-хайлайты
-        for _,o in ipairs(Workspace:GetDescendants()) do
-            local h=o:FindFirstChild("_RHL"); if h then h:Destroy() end
+-- ── RADIUS ESP LOGIC ──────────────────────────────────
+-- Прячет/показывает ESP объектов в зависимости от расстояния
+local function UpdateRadiusESP()
+    if not F.radiusESP or not HRP then return end
+    if not currentRooms then return end
+    for _,room in ipairs(currentRooms:GetChildren()) do
+        for _,desc in ipairs(room:GetDescendants()) do
+            if not desc:IsA("BasePart") then continue end
+            local dist=(desc.Position-HRP.Position).Magnitude
+            -- Ищем все BillboardGui (надписи) и Highlight (обводки)
+            for _,ch in ipairs(desc:GetChildren()) do
+                if ch:IsA("BillboardGui") and ch.Name~="PlayerESP" then
+                    ch.Enabled=(dist<=F.radiusVal)
+                end
+            end
+            -- Highlight на родителе
+            local par=desc.Parent
+            if par and par~=room then
+                for _,ch in ipairs(par:GetChildren()) do
+                    if ch:IsA("Highlight") and ch.Name~="PlayerESP_HL" and ch.Name~="_XHL" then
+                        ch.Enabled=(dist<=F.radiusVal)
+                    end
+                end
+            end
         end
     end
+end
+
+-- ── WATER PLATFORM ─────────────────────────────────────
+-- Исправление: маркер над водой должен быть непробиваемым снизу
+local function MakePoolMarkerFixed(pool)
+    if not pool or not pool:IsA("BasePart") then return end
+    if pool:FindFirstChild("_PM") then return end
+    local sz=pool.Size
+    local m=Instance.new("Part"); m.Name="_PM"
+    m.Size=Vector3.new(sz.X,0.5,sz.Z)
+    m.Anchored=true; m.CanCollide=true  -- CanCollide=true чтобы стоять
+    m.Transparency=0.3
+    m.BrickColor=BrickColor.new("Bright blue"); m.Material=Enum.Material.Neon
+    -- Ставим сверху пула
+    m.CFrame=CFrame.new(pool.Position+Vector3.new(0,sz.Y/2+0.25,0))
+    m.Parent=Workspace
+    table.insert(poolParts,m)
+    local b=Instance.new("BillboardGui"); b.Size=UDim2.new(0,120,0,26)
+    b.AlwaysOnTop=true; b.StudsOffset=Vector3.new(0,1.5,0); b.Adornee=m; b.Parent=m
+    local l=Instance.new("TextLabel"); l.Size=UDim2.new(1,0,1,0)
+    l.BackgroundTransparency=1; l.Text="💧 "..pool.Name
+    l.TextColor3=Color3.fromRGB(100,220,255); l.TextStrokeTransparency=0
+    l.TextSize=13; l.Font=Enum.Font.GothamBold; l.Parent=b
+    pool.AncestryChanged:Connect(function()
+        if not pool.Parent then pcall(function() m:Destroy() end) end
+    end)
+end
+
+-- Переопределяем HandleWater чтобы использовал новую версию
+local _oldHandleWater=HandleWater
+HandleWater=function(w)
+    if not F.waterPool then return end
+    for i=1,10 do
+        local p=w:FindFirstChild("Pool"..i)
+        if p and p:IsA("BasePart") then MakePoolMarkerFixed(p) end
+    end
+    w.ChildAdded:Connect(function(ch)
+        if not F.waterPool then return end
+        if ch.Name:match("^Pool%d+$") and ch:IsA("BasePart") then MakePoolMarkerFixed(ch) end
+    end)
+end
+
+-- ── BASH MOVING ────────────────────────────────────────
+local bashActive=false; local bashSavedY=nil; local bashPlt=nil
+local BASH_OFFSET=16; local BASH_SPEED=2  -- 2 блока в секунду → 16 блоков = 8 сек вниз
+
+local function StartBash(obj)
+    if F.bashNotif then Notif("💥 BASH!","BashMoving появился!") end
+    if F.bash and HRP and not bashActive then
+        bashActive=true; bashSavedY=HRP.Position.Y
+        bashPlt=Instance.new("Part"); bashPlt.Size=Vector3.new(8,0.4,8)
+        bashPlt.Anchored=true; bashPlt.CanCollide=true; bashPlt.Transparency=0.4
+        bashPlt.BrickColor=BrickColor.new("Bright orange"); bashPlt.Material=Enum.Material.Neon
+        bashPlt.Parent=Workspace
+        -- Плавно вниз 16 блоков за 8 сек (2 блока/сек)
+        local dur=BASH_OFFSET/BASH_SPEED
+        SmoothY(bashSavedY, bashSavedY-BASH_OFFSET, dur, function(y)
+            if HRP then HRP.CFrame=CFrame.new(HRP.Position.X,y,HRP.Position.Z) end
+            if bashPlt then bashPlt.CFrame=CFrame.new(HRP.Position.X,HRP.Position.Y-3.2,HRP.Position.Z) end
+        end, function()
+            -- Подождём пока BashMoving не исчезнет сам
+        end)
+    end
+    obj.AncestryChanged:Connect(function()
+        if not obj.Parent and bashActive then
+            bashActive=false
+            if HRP and bashSavedY then
+                local fy=HRP.Position.Y
+                SmoothY(fy, bashSavedY, BASH_OFFSET/BASH_SPEED, function(y)
+                    if HRP then HRP.CFrame=CFrame.new(HRP.Position.X,y,HRP.Position.Z) end
+                    if bashPlt then bashPlt.CFrame=CFrame.new(HRP.Position.X,HRP.Position.Y-3.2,HRP.Position.Z) end
+                end, function()
+                    bypassAntiTp=false; bashSavedY=nil
+                    if bashPlt then bashPlt:Destroy(); bashPlt=nil end
+                end)
+            else
+                bypassAntiTp=false
+            end
+        end
+    end)
+end
+
+Workspace.ChildAdded:Connect(function(obj)
+    if obj.Name=="BashMoving" then StartBash(obj) end
 end)
-Sld(pPlayers,"Радиус ESP (блоков)",50,500,150,function(v) F.radiusVal=v end)
+for _,obj in ipairs(Workspace:GetChildren()) do
+    if obj.Name=="BashMoving" then StartBash(obj) end
+end
+
+-- ── RANSOM FIX — через 3 сек возвращаем управление ────
+-- Переопределяем обработку Ransom: даём управление через 3 сек
+Workspace.DescendantAdded:Connect(function(desc)
+    if desc.Name=="Ransom" and F.ransom then
+        Notif("🔒 RANSOM","Заморозка на 3 секунды!")
+        if Humanoid then
+            Humanoid.WalkSpeed=0; Humanoid.JumpPower=0; Humanoid.JumpHeight=0
+        end
+        UIS.MouseBehavior=Enum.MouseBehavior.LockCurrentPosition
+        Camera.CameraType=Enum.CameraType.Scriptable
+        local frozenCF=Camera.CFrame
+        local unfrozen=false
+        local freezeConn; freezeConn=RunService.RenderStepped:Connect(function()
+            if unfrozen then freezeConn:Disconnect(); return end
+            Camera.CFrame=frozenCF
+        end)
+        -- Через 3 секунды всегда возвращаем управление
+        task.delay(3, function()
+            unfrozen=true
+            if Humanoid then
+                Humanoid.WalkSpeed=F.speed and F.spd or 16
+                Humanoid.JumpPower=50; Humanoid.JumpHeight=7.2
+            end
+            UIS.MouseBehavior=Enum.MouseBehavior.Default
+            if not fcActive then Camera.CameraType=Enum.CameraType.Custom end
+            Notif("🔓 RANSOM","Управление возвращено!")
+        end)
+    end
+end)
+
+-- ── RADIUS ESP в main loop ─────────────────────────────
+-- Добавляем в конец Heartbeat
+RunService.Heartbeat:Connect(function()
+    if F.radiusESP then UpdateRadiusESP() end
+end)
 
 Notif("Doors v3.2","RightShift = меню | /200 = секрет")
