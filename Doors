@@ -1,1547 +1,1111 @@
---// DOORS SCRIPT v3.1
---// Tabbed menu: ESP / МОНСТРЫ / ИГРОКИ / ТЕСТ
---// Fixes: tab buttons top-aligned, smooth rush/ambush ignores anti-tp,
---//        doors highlight through walls, new items ESP
+--// DOORS SCRIPT v3.2 — clean rewrite
+local Players=game:GetService("Players")
+local Workspace=game:GetService("Workspace")
+local RunService=game:GetService("RunService")
+local CoreGui=game:GetService("CoreGui")
+local UIS=game:GetService("UserInputService")
+local StarterGui=game:GetService("StarterGui")
 
-local Players          = game:GetService("Players")
-local Workspace        = game:GetService("Workspace")
-local RunService       = game:GetService("RunService")
-local CoreGui          = game:GetService("CoreGui")
-local UserInputService = game:GetService("UserInputService")
-local StarterGui       = game:GetService("StarterGui")
-
-local Player           = Players.LocalPlayer
-local Camera           = Workspace.CurrentCamera
-local Character        = Player.Character or Player.CharacterAdded:Wait()
-local Humanoid         = Character:WaitForChild("Humanoid")
-local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
-
-Player.CharacterAdded:Connect(function(char)
-    Character        = char
-    Humanoid         = char:WaitForChild("Humanoid")
-    HumanoidRootPart = char:WaitForChild("HumanoidRootPart")
+local Player=Players.LocalPlayer
+local Camera=Workspace.CurrentCamera
+local Character=Player.Character or Player.CharacterAdded:Wait()
+local Humanoid=Character:WaitForChild("Humanoid")
+local HRP=Character:WaitForChild("HumanoidRootPart")
+Player.CharacterAdded:Connect(function(c)
+    Character=c; Humanoid=c:WaitForChild("Humanoid"); HRP=c:WaitForChild("HumanoidRootPart")
 end)
 
--- ══════════════════════════════════════════════
---  STATE FLAGS
--- ══════════════════════════════════════════════
-local doorsESPEnabled   = false
-local keyESPEnabled     = false
-local leverESPEnabled   = false
-local booksESP          = false
-local crucifixESP       = false
-local itemsESP          = false
-local snareESP          = false
-local polesESP          = false
+-- убираем туман
+local function NoFog() game.Lighting.FogEnd=100000; game.Lighting.FogStart=99999 end
+NoFog(); game.Lighting:GetPropertyChangedSignal("FogEnd"):Connect(NoFog)
 
-local rushAmbushESP     = false
-local rushNotif         = false
-local rushUpEnabled     = false
-local ambushDownEnabled = false
-local eyesESP           = false
-local eyesAntiDmg       = false
-local screechNotif      = false
-local screechTurn       = false
-local figureESP         = false
-local figureAvoid       = false
-local avoidRadius       = 15
+local function Notif(t,m) pcall(function() StarterGui:SetCore("SendNotification",{Title=t,Text=m,Duration=3}) end) end
 
-local playerESPEnabled  = false
-local speedEnabled      = false
-local customSpeed       = 16
-local antiTpEnabled     = false
-local customFOV         = 70
+-- ── ФЛАГИ ──────────────────────────────────────────────
+local F={
+    doors=false,key=false,lever=false,books=false,crucifix=false,
+    items=false,snare=false,poles=false,mousehole=false,
+    rushESP=false,rushNotif=false,rushUp=false,ambushDown=false,
+    eyesESP=false,eyesAnti=false,almaAnti=false,
+    screechNotif=false,screechTurn=false,
+    figESP=false,figAvoid=false,figR=15,
+    plrESP=false,speed=false,spd=16,fov=70,
+    xray=false,freecam=false,
+    drones=false,drops=false,gold=false,waterPool=false,
+    cooler=false,scribbles=false,ransom=false,stampede=false,
+    bash=false,bashNotif=false,
+    radiusESP=false,radiusVal=150,
+    battery=false,hole=false,giggle=false,mines=false,mines2=false,grumbo=false,pump=false,
+    follow=false,followSpd=16,
+}
 
--- Rush/Ambush smooth move
-local rushActive        = false
-local ambushActive      = false
-local rushSavedY        = nil
-local ambushSavedY      = nil
-local MOVE_DUR          = 5.0  -- очень плавно
-local OFFSET_Y          = 45
+-- Rush/Ambush
+local MOVE_DUR=5.0; local OFFSET_Y=45
+local rushActive=false; local ambushActive=false
+local rushSavedY=nil; local ambushSavedY=nil
+local bypassAntiTp=false
+local notifRush={}
 
--- Плита под игроком
-local safePlatform      = nil
+-- Freecam
+local fcActive=false; local fcCam=nil; local fcPitch=0; local fcYaw=0
+local fcConn=nil; local recConn=nil
+local recPoints={}; local trail={}; local playing=false; local pathSpd=16
+local pathPlt=nil
 
--- Anti-tp bypass: пока идёт плавное движение — блокируем анти-тп
-local bypassAntiTp      = false
+-- Follow
+local followTarget=nil; local followConn=nil; local followPlt=nil
 
-local notifiedRush      = {}
-local activeSreech      = nil
-local screechNames      = {Screech=true, ScreechRetro=true, ScreechRushMode=true}
+-- Water pools
+local poolParts={}
 
-local function SendNotif(title, text)
-    pcall(function()
-        StarterGui:SetCore("SendNotification",{Title=title,Text=text,Duration=3})
-    end)
-end
+-- Screech
+local activeScreech=nil
+local screechNames={Screech=true,ScreechRetro=true,ScreechRushMode=true}
 
--- Убираем туман автоматически
-local function RemoveFog()
-    game.Lighting.FogEnd = 100000
-    game.Lighting.FogStart = 99999
-    game.Lighting.FogColor = Color3.fromRGB(0,0,0)
-end
-RemoveFog()
-game.Lighting:GetPropertyChangedSignal("FogEnd"):Connect(RemoveFog)
+-- Forward declarations
+local HandleDrop,HandleDrone,ScanWaterPools,SubscribeRoom
 
-local dronesESP      = false
-local dropsESP       = false
-local goldLootESP    = false
-local xrayEnabled    = false
-local freecamEnabled = false
-local freecamActive    = false
-local freecamCam       = nil
-local recordingPath    = false
-local recordedPoints   = {}
-local pathTrail        = {}
-local isPlayingPath    = false
-local pathPlaySpeed    = 16
-local pathPlatform     = nil
+-- ── GUI ────────────────────────────────────────────────
+local SG=Instance.new("ScreenGui"); SG.Name="DV32"; SG.ResetOnSpawn=false
+pcall(function() SG.Parent=CoreGui end)
+if SG.Parent~=CoreGui then SG.Parent=Player:WaitForChild("PlayerGui") end
 
--- forward declaration
-local HandleDrop
-local HandleDrone
-local ScanWaterPools
-local SubscribeRoom
+local Root=Instance.new("Frame")
+Root.Size=UDim2.new(0,590,0,480); Root.Position=UDim2.new(0,20,0.5,-240)
+Root.BackgroundColor3=Color3.fromRGB(18,18,22); Root.BorderSizePixel=0; Root.Parent=SG
+Instance.new("UICorner",Root).CornerRadius=UDim.new(0,12)
 
--- ══════════════════════════════════════════════
---  GUI
--- ══════════════════════════════════════════════
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "DoorsV31"
-ScreenGui.ResetOnSpawn = false
-pcall(function() ScreenGui.Parent = CoreGui end)
-if ScreenGui.Parent ~= CoreGui then
-    ScreenGui.Parent = Player:WaitForChild("PlayerGui")
-end
+local TBar=Instance.new("Frame")
+TBar.Size=UDim2.new(1,0,0,36); TBar.BackgroundColor3=Color3.fromRGB(28,28,36)
+TBar.BorderSizePixel=0; TBar.Parent=Root
+Instance.new("UICorner",TBar).CornerRadius=UDim.new(0,12)
+local TFix=Instance.new("Frame"); TFix.Size=UDim2.new(1,0,0,12)
+TFix.Position=UDim2.new(0,0,1,-12); TFix.BackgroundColor3=TBar.BackgroundColor3
+TFix.BorderSizePixel=0; TFix.Parent=TBar
 
-local Root = Instance.new("Frame")
-Root.Name = "Root"
-Root.Size = UDim2.new(0, 590, 0, 470)
-Root.Position = UDim2.new(0, 20, 0.5, -235)
-Root.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
-Root.BorderSizePixel = 0
-Root.Visible = true
-Root.Parent = ScreenGui
-Instance.new("UICorner", Root).CornerRadius = UDim.new(0, 12)
+local TLbl=Instance.new("TextLabel"); TLbl.Size=UDim2.new(1,-10,1,0)
+TLbl.Position=UDim2.new(0,10,0,0); TLbl.BackgroundTransparency=1
+TLbl.Text="🚪 DOORS UTILITY v3.2  |  RightShift = скрыть"
+TLbl.TextColor3=Color3.fromRGB(210,210,220); TLbl.TextSize=12
+TLbl.Font=Enum.Font.GothamBold; TLbl.TextXAlignment=Enum.TextXAlignment.Left; TLbl.Parent=TBar
 
--- Title bar
-local TitleBar = Instance.new("Frame")
-TitleBar.Size = UDim2.new(1, 0, 0, 36)
-TitleBar.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
-TitleBar.BorderSizePixel = 0
-TitleBar.Parent = Root
-Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, 12)
--- square bottom corners on title
-local TitleMaskBottom = Instance.new("Frame")
-TitleMaskBottom.Size = UDim2.new(1, 0, 0, 12)
-TitleMaskBottom.Position = UDim2.new(0, 0, 1, -12)
-TitleMaskBottom.BackgroundColor3 = TitleBar.BackgroundColor3
-TitleMaskBottom.BorderSizePixel = 0
-TitleMaskBottom.Parent = TitleBar
-
-local TitleLbl = Instance.new("TextLabel")
-TitleLbl.Size = UDim2.new(1, -50, 1, 0)
-TitleLbl.Position = UDim2.new(0, 12, 0, 0)
-TitleLbl.BackgroundTransparency = 1
-TitleLbl.Text = "🚪  DOORS UTILITY  v3.1"
-TitleLbl.TextColor3 = Color3.fromRGB(200, 200, 215)
-TitleLbl.TextSize = 13
-TitleLbl.Font = Enum.Font.GothamBold
-TitleLbl.TextXAlignment = Enum.TextXAlignment.Left
-TitleLbl.Parent = TitleBar
-
-local HintLbl = Instance.new("TextLabel")
-HintLbl.Size = UDim2.new(0, 160, 1, 0)
-HintLbl.Position = UDim2.new(1, -165, 0, 0)
-HintLbl.BackgroundTransparency = 1
-HintLbl.Text = "RightShift — скрыть"
-HintLbl.TextColor3 = Color3.fromRGB(100, 100, 120)
-HintLbl.TextSize = 11
-HintLbl.Font = Enum.Font.Gotham
-HintLbl.TextXAlignment = Enum.TextXAlignment.Right
-HintLbl.Parent = TitleBar
-
--- Drag
-local dragging, dragStart, winStart = false, nil, nil
-TitleBar.InputBegan:Connect(function(i)
-    if i.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragging = true; dragStart = i.Position; winStart = Root.Position
+-- drag
+local drag,dragS,winS=false,nil,nil
+TBar.InputBegan:Connect(function(i)
+    if i.UserInputType==Enum.UserInputType.MouseButton1 then
+        drag=true; dragS=i.Position; winS=Root.Position
     end
 end)
-UserInputService.InputChanged:Connect(function(i)
-    if dragging and i.UserInputType == Enum.UserInputType.MouseMovement then
-        local d = i.Position - dragStart
-        Root.Position = UDim2.new(winStart.X.Scale, winStart.X.Offset+d.X,
-                                   winStart.Y.Scale, winStart.Y.Offset+d.Y)
+UIS.InputChanged:Connect(function(i)
+    if drag and i.UserInputType==Enum.UserInputType.MouseMovement then
+        local d=i.Position-dragS
+        Root.Position=UDim2.new(winS.X.Scale,winS.X.Offset+d.X,winS.Y.Scale,winS.Y.Offset+d.Y)
     end
 end)
-UserInputService.InputEnded:Connect(function(i)
-    if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
-end)
-UserInputService.InputBegan:Connect(function(i, gp)
-    if not gp and i.KeyCode == Enum.KeyCode.RightShift then Root.Visible = not Root.Visible end
-end)
+UIS.InputEnded:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then drag=false end end)
+UIS.InputBegan:Connect(function(i,gp) if not gp and i.KeyCode==Enum.KeyCode.RightShift then Root.Visible=not Root.Visible end end)
 
--- ── LEFT tab panel ──────────────────────────────
-local TabPanel = Instance.new("Frame")
-TabPanel.Name = "TabPanel"
-TabPanel.Size = UDim2.new(0, 130, 1, -36)
-TabPanel.Position = UDim2.new(0, 0, 0, 36)
-TabPanel.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
-TabPanel.BorderSizePixel = 0
-TabPanel.ClipsDescendants = false
-TabPanel.Parent = Root
-Instance.new("UICorner", TabPanel).CornerRadius = UDim.new(0, 10)
+-- Tab panel
+local TabPanel=Instance.new("Frame")
+TabPanel.Size=UDim2.new(0,130,1,-36); TabPanel.Position=UDim2.new(0,0,0,36)
+TabPanel.BackgroundColor3=Color3.fromRGB(22,22,28); TabPanel.BorderSizePixel=0; TabPanel.Parent=Root
+Instance.new("UICorner",TabPanel).CornerRadius=UDim.new(0,10)
 
--- кнопки позиционируем вручную через tabYOffset
+local Content=Instance.new("Frame")
+Content.Size=UDim2.new(1,-138,1,-40); Content.Position=UDim2.new(0,138,0,38)
+Content.BackgroundTransparency=1; Content.Parent=Root
 
--- ── RIGHT content area ───────────────────────────
-local ContentArea = Instance.new("Frame")
-ContentArea.Size = UDim2.new(1, -138, 1, -40)
-ContentArea.Position = UDim2.new(0, 138, 0, 38)
-ContentArea.BackgroundTransparency = 1
-ContentArea.Parent = Root
-
--- ══════════════════════════════════════════════
---  UI HELPERS
--- ══════════════════════════════════════════════
-local TAB_OFF = Color3.fromRGB(32, 32, 42)
-local TAB_ON  = Color3.fromRGB(55, 90, 200)
-local BTN_OFF = Color3.fromRGB(30, 30, 40)
-local BTN_ON  = Color3.fromRGB(28, 58, 28)
-
-local tabs = {}
-local activeTab = nil
+local tabs={}; local tabY=10
+local TAB_OFF=Color3.fromRGB(32,32,42); local TAB_ON=Color3.fromRGB(55,90,200)
+local BTN_OFF=Color3.fromRGB(30,30,40); local BTN_ON=Color3.fromRGB(28,58,28)
 
 local function SelectTab(name)
-    for n, t in pairs(tabs) do
-        local on = (n == name)
-        t.btn.BackgroundColor3 = on and TAB_ON or TAB_OFF
-        t.btn.TextColor3 = on and Color3.fromRGB(255,255,255) or Color3.fromRGB(140,140,160)
-        t.page.Visible = on
+    for n,t in pairs(tabs) do
+        local on=(n==name)
+        t.btn.BackgroundColor3=on and TAB_ON or TAB_OFF
+        t.btn.TextColor3=on and Color3.fromRGB(255,255,255) or Color3.fromRGB(140,140,160)
+        t.page.Visible=on
     end
-    activeTab = name
 end
 
-local tabYOffset = 10
-local function AddTab(icon, label)
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0, 118, 0, 36)
-    btn.Position = UDim2.new(0, 6, 0, tabYOffset)
-    tabYOffset = tabYOffset + 41
-    btn.BackgroundColor3 = TAB_OFF
-    btn.Text = icon .. "  " .. label
-    btn.TextColor3 = Color3.fromRGB(140,140,160)
-    btn.TextSize = 13
-    btn.Font = Enum.Font.GothamBold
-    btn.TextXAlignment = Enum.TextXAlignment.Left
-    btn.AutoButtonColor = false
-    btn.Parent = TabPanel
-    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
-    local bp = Instance.new("UIPadding"); bp.PaddingLeft = UDim.new(0,10); bp.Parent = btn
+local function AddTab(icon,label)
+    local btn=Instance.new("TextButton")
+    btn.Size=UDim2.new(0,118,0,36); btn.Position=UDim2.new(0,6,0,tabY)
+    tabY=tabY+41; btn.BackgroundColor3=TAB_OFF
+    btn.Text=icon.."  "..label; btn.TextColor3=Color3.fromRGB(140,140,160)
+    btn.TextSize=12; btn.Font=Enum.Font.GothamBold
+    btn.TextXAlignment=Enum.TextXAlignment.Left; btn.AutoButtonColor=false; btn.Parent=TabPanel
+    Instance.new("UICorner",btn).CornerRadius=UDim.new(0,8)
+    local bp=Instance.new("UIPadding"); bp.PaddingLeft=UDim.new(0,8); bp.Parent=btn
 
-    local page = Instance.new("ScrollingFrame")
-    page.Size = UDim2.new(1, -6, 1, -6)
-    page.Position = UDim2.new(0, 3, 0, 3)
-    page.BackgroundTransparency = 1
-    page.CanvasSize = UDim2.new(0,0,0,0)
-    page.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    page.ScrollBarThickness = 4
-    page.ScrollBarImageColor3 = Color3.fromRGB(80,80,100)
-    page.Visible = false
-    page.Parent = ContentArea
+    local page=Instance.new("ScrollingFrame")
+    page.Size=UDim2.new(1,-6,1,-6); page.Position=UDim2.new(0,3,0,3)
+    page.BackgroundTransparency=1; page.CanvasSize=UDim2.new(0,0,0,0)
+    page.AutomaticCanvasSize=Enum.AutomaticSize.Y
+    page.ScrollBarThickness=4; page.ScrollBarImageColor3=Color3.fromRGB(80,80,100)
+    page.Visible=false; page.Parent=Content
+    local ll=Instance.new("UIListLayout"); ll.SortOrder=Enum.SortOrder.LayoutOrder
+    ll.Padding=UDim.new(0,5); ll.Parent=page
+    local pp=Instance.new("UIPadding"); pp.PaddingTop=UDim.new(0,4); pp.PaddingRight=UDim.new(0,4); pp.Parent=page
 
-    local list = Instance.new("UIListLayout")
-    list.SortOrder = Enum.SortOrder.LayoutOrder
-    list.Padding = UDim.new(0, 5)
-    list.Parent = page
-
-    local pad = Instance.new("UIPadding")
-    pad.PaddingTop = UDim.new(0,4); pad.PaddingRight = UDim.new(0,4)
-    pad.Parent = page
-
-    tabs[label] = {btn=btn, page=page}
+    tabs[label]={btn=btn,page=page}
     btn.MouseButton1Click:Connect(function() SelectTab(label) end)
     return page
 end
 
-local function AddLabel(page, text)
-    local lbl = Instance.new("TextLabel")
-    lbl.Size = UDim2.new(1,0,0,20)
-    lbl.BackgroundColor3 = Color3.fromRGB(35,35,52)
-    lbl.Text = "  " .. text
-    lbl.TextColor3 = Color3.fromRGB(120,150,255)
-    lbl.TextSize = 11
-    lbl.Font = Enum.Font.GothamBold
-    lbl.TextXAlignment = Enum.TextXAlignment.Left
-    lbl.Parent = page
-    Instance.new("UICorner", lbl).CornerRadius = UDim.new(0,5)
+local function Lbl(page,text)
+    local l=Instance.new("TextLabel"); l.Size=UDim2.new(1,0,0,20)
+    l.BackgroundColor3=Color3.fromRGB(35,35,52); l.Text="  "..text
+    l.TextColor3=Color3.fromRGB(120,150,255); l.TextSize=11; l.Font=Enum.Font.GothamBold
+    l.TextXAlignment=Enum.TextXAlignment.Left; l.Parent=page
+    Instance.new("UICorner",l).CornerRadius=UDim.new(0,5)
 end
 
-local function AddToggle(page, name, callback)
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(1,0,0,33)
-    btn.BackgroundColor3 = BTN_OFF
-    btn.Text = "  ○  " .. name
-    btn.TextColor3 = Color3.fromRGB(200,80,80)
-    btn.TextSize = 12
-    btn.Font = Enum.Font.GothamSemibold
-    btn.TextXAlignment = Enum.TextXAlignment.Left
-    btn.AutoButtonColor = false
-    btn.Parent = page
-    Instance.new("UICorner", btn).CornerRadius = UDim.new(0,7)
-    local state = false
-    btn.MouseButton1Click:Connect(function()
-        state = not state
-        btn.Text = (state and "  ●  " or "  ○  ") .. name
-        btn.TextColor3 = state and Color3.fromRGB(80,220,100) or Color3.fromRGB(200,80,80)
-        btn.BackgroundColor3 = state and BTN_ON or BTN_OFF
-        callback(state)
+local function Tog(page,name,cb)
+    local b=Instance.new("TextButton"); b.Size=UDim2.new(1,0,0,32)
+    b.BackgroundColor3=BTN_OFF; b.Text="  ○  "..name
+    b.TextColor3=Color3.fromRGB(200,80,80); b.TextSize=12; b.Font=Enum.Font.GothamSemibold
+    b.TextXAlignment=Enum.TextXAlignment.Left; b.AutoButtonColor=false; b.Parent=page
+    Instance.new("UICorner",b).CornerRadius=UDim.new(0,6)
+    local st=false
+    b.MouseButton1Click:Connect(function()
+        st=not st
+        b.Text=(st and "  ●  " or "  ○  ")..name
+        b.TextColor3=st and Color3.fromRGB(80,220,100) or Color3.fromRGB(200,80,80)
+        b.BackgroundColor3=st and BTN_ON or BTN_OFF
+        cb(st)
     end)
+    return b
 end
 
-local function AddSlider(page, name, minV, maxV, default, callback)
-    local con = Instance.new("Frame")
-    con.Size = UDim2.new(1,0,0,52)
-    con.BackgroundColor3 = BTN_OFF
-    con.Parent = page
-    Instance.new("UICorner", con).CornerRadius = UDim.new(0,7)
-
-    local lbl = Instance.new("TextLabel")
-    lbl.Size = UDim2.new(1,-8,0,22); lbl.Position = UDim2.new(0,8,0,2)
-    lbl.BackgroundTransparency = 1
-    lbl.Text = name..": "..tostring(default)
-    lbl.TextColor3 = Color3.fromRGB(210,210,210)
-    lbl.TextSize = 12; lbl.Font = Enum.Font.GothamSemibold
-    lbl.TextXAlignment = Enum.TextXAlignment.Left; lbl.Parent = con
-
-    local bar = Instance.new("TextButton")
-    bar.Size = UDim2.new(0.92,0,0,9); bar.Position = UDim2.new(0.04,0,0,36)
-    bar.BackgroundColor3 = Color3.fromRGB(50,50,65); bar.Text = ""; bar.Parent = con
-    Instance.new("UICorner", bar).CornerRadius = UDim.new(0,4)
-
-    local fill = Instance.new("Frame")
-    fill.Size = UDim2.new((default-minV)/(maxV-minV),0,1,0)
-    fill.BackgroundColor3 = Color3.fromRGB(55,100,230); fill.BorderSizePixel=0; fill.Parent=bar
-    Instance.new("UICorner", fill).CornerRadius = UDim.new(0,4)
-
-    local drag2=false
-    bar.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then drag2=true end end)
-    UserInputService.InputEnded:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then drag2=false end end)
-    UserInputService.InputChanged:Connect(function(i)
-        if drag2 and i.UserInputType==Enum.UserInputType.MouseMovement then
-            local pct=math.clamp((UserInputService:GetMouseLocation().X-bar.AbsolutePosition.X)/bar.AbsoluteSize.X,0,1)
+local function Sld(page,name,mn,mx,def,cb)
+    local con=Instance.new("Frame"); con.Size=UDim2.new(1,0,0,50)
+    con.BackgroundColor3=BTN_OFF; con.Parent=page
+    Instance.new("UICorner",con).CornerRadius=UDim.new(0,6)
+    local l=Instance.new("TextLabel"); l.Size=UDim2.new(1,-8,0,22); l.Position=UDim2.new(0,8,0,2)
+    l.BackgroundTransparency=1; l.Text=name..": "..def; l.TextColor3=Color3.fromRGB(210,210,210)
+    l.TextSize=12; l.Font=Enum.Font.GothamSemibold; l.TextXAlignment=Enum.TextXAlignment.Left; l.Parent=con
+    local bar=Instance.new("TextButton"); bar.Size=UDim2.new(0.92,0,0,9); bar.Position=UDim2.new(0.04,0,0,34)
+    bar.BackgroundColor3=Color3.fromRGB(50,50,65); bar.Text=""; bar.Parent=con
+    Instance.new("UICorner",bar).CornerRadius=UDim.new(0,4)
+    local fill=Instance.new("Frame"); fill.Size=UDim2.new((def-mn)/(mx-mn),0,1,0)
+    fill.BackgroundColor3=Color3.fromRGB(55,100,230); fill.BorderSizePixel=0; fill.Parent=bar
+    Instance.new("UICorner",fill).CornerRadius=UDim.new(0,4)
+    local dr=false
+    bar.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then dr=true end end)
+    UIS.InputEnded:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then dr=false end end)
+    UIS.InputChanged:Connect(function(i)
+        if dr and i.UserInputType==Enum.UserInputType.MouseMovement then
+            local pct=math.clamp((UIS:GetMouseLocation().X-bar.AbsolutePosition.X)/bar.AbsoluteSize.X,0,1)
             fill.Size=UDim2.new(pct,0,1,0)
-            local val=math.floor(minV+(maxV-minV)*pct)
-            lbl.Text=name..": "..tostring(val)
-            callback(val)
+            local v=math.floor(mn+(mx-mn)*pct); l.Text=name..": "..v; cb(v)
         end
     end)
 end
 
--- ══════════════════════════════════════════════
---  BUILD TABS
--- ══════════════════════════════════════════════
-local pageESP     = AddTab("🔍","ЕСП")
-local pageMobs    = AddTab("👹","МОНСТРЫ")
-local pagePlayers = AddTab("👥","ИГРОКИ")
-local pageTest    = AddTab("🧪","ТЕСТ")
+local function Btn(page,text,col,tcol,cb)
+    local b=Instance.new("TextButton"); b.Size=UDim2.new(1,0,0,32)
+    b.BackgroundColor3=col; b.Text="  "..text; b.TextColor3=tcol
+    b.TextSize=12; b.Font=Enum.Font.GothamBold
+    b.TextXAlignment=Enum.TextXAlignment.Left; b.AutoButtonColor=false; b.Parent=page
+    Instance.new("UICorner",b).CornerRadius=UDim.new(0,6)
+    b.MouseButton1Click:Connect(cb); return b
+end
 
--- ── ЕСП ──────────────────────────────────────
-AddLabel(pageESP,"Двери")
-AddToggle(pageESP,"Правильная дверь ESP + обводка", function(s) doorsESPEnabled=s; refreshDoorsESP() end)
+-- ── TABS ───────────────────────────────────────────────
+local pESP    =AddTab("🔍","ЕСП")
+local pMobs   =AddTab("👹","МОНСТРЫ")
+local pPlayers=AddTab("👥","ИГРОКИ")
+local pTest   =AddTab("🧪","ТЕСТ")
+local pFloor2 =AddTab("🏚","2 ЭТАЖ")
+local pArchive=AddTab("📦","АРХИВЫ")
 
-AddLabel(pageESP,"Предметы")
-AddToggle(pageESP,"Ключ ESP + обводка",             function(s) keyESPEnabled=s;   refreshKeysESP() end)
-AddToggle(pageESP,"Рычаг для ворот ESP",            function(s) leverESPEnabled=s; refreshLeverESP() end)
-AddToggle(pageESP,"Книги (комн. 50) ESP",           function(s) booksESP=s;        refreshBooksESP() end)
-AddToggle(pageESP,"Крест ESP",                      function(s) crucifixESP=s;     refreshCrucifixESP() end)
-AddToggle(pageESP,"Предметы (стол/стул) ESP",       function(s) itemsESP=s;        refreshItemsESP() end)
-AddToggle(pageESP,"Ловушки (90-99) ESP",            function(s) snareESP=s end)
-AddToggle(pageESP,"Рычаги (комн. 100) ESP",         function(s) polesESP=s end)
+-- ESP tab
+Lbl(pESP,"Двери")
+Tog(pESP,"Правильная дверь ESP + обводка",function(s) F.doors=s; refreshDoorsESP() end)
+Lbl(pESP,"Предметы")
+Tog(pESP,"Ключ ESP + обводка",function(s) F.key=s; refreshKeysESP() end)
+Tog(pESP,"Рычаг для ворот ESP",function(s) F.lever=s; refreshLeverESP() end)
+Tog(pESP,"Книги (комн.50) ESP",function(s) F.books=s; refreshBooksESP() end)
+Tog(pESP,"Крест ESP",function(s) F.crucifix=s; refreshCrucifixESP() end)
+Tog(pESP,"Предметы (стол) ESP",function(s) F.items=s; refreshItemsESP() end)
+Tog(pESP,"Ловушки (90-99) ESP",function(s) F.snare=s end)
+Tog(pESP,"Рычаги (комн.100) ESP",function(s) F.poles=s end)
 
--- ── МОНСТРЫ ──────────────────────────────────
-AddLabel(pageMobs,"Rush / Ambush")
-AddToggle(pageMobs,"Rush & Ambush ESP",             function(s) rushAmbushESP=s end)
-AddToggle(pageMobs,"Rush & Ambush уведомления",     function(s) rushNotif=s end)
-AddToggle(pageMobs,"Rush → вверх +25 (плавно)",     function(s) rushUpEnabled=s end)
-AddToggle(pageMobs,"Ambush → вниз -25 (плавно)",    function(s) ambushDownEnabled=s end)
-AddLabel(pageMobs,"Глаза / Скрич")
-AddToggle(pageMobs,"Eyes ESP",                      function(s) eyesESP=s end)
-AddToggle(pageMobs,"Eyes — не смотреть",            function(s) eyesAntiDmg=s end)
-AddToggle(pageMobs,"Screech уведомление",           function(s) screechNotif=s end)
-AddToggle(pageMobs,"Screech авто-поворот камеры",   function(s) screechTurn=s end)
-AddLabel(pageMobs,"Figure")
-AddToggle(pageMobs,"Figure ESP",                    function(s) figureESP=s end)
-AddToggle(pageMobs,"Figure авто-отход",             function(s) figureAvoid=s end)
-AddSlider(pageMobs,"Figure радиус отхода",5,40,15,  function(v) avoidRadius=v end)
+-- Mobs tab
+Lbl(pMobs,"Rush / Ambush")
+Tog(pMobs,"Rush & Ambush ESP",function(s) F.rushESP=s end)
+Tog(pMobs,"Rush & Ambush уведомления",function(s) F.rushNotif=s end)
+Tog(pMobs,"Rush → плавно вверх +45",function(s) F.rushUp=s end)
+Tog(pMobs,"Ambush → плавно вниз -45",function(s) F.ambushDown=s end)
+Lbl(pMobs,"Глаза / Скрич / Алма")
+Tog(pMobs,"Eyes ESP",function(s) F.eyesESP=s end)
+Tog(pMobs,"Eyes — не смотреть",function(s) F.eyesAnti=s end)
+Tog(pMobs,"Alma — анти-взгляд",function(s) F.almaAnti=s end)
+Tog(pMobs,"Screech уведомление",function(s) F.screechNotif=s end)
+Tog(pMobs,"Screech авто-поворот камеры",function(s) F.screechTurn=s end)
+Lbl(pMobs,"Figure")
+Tog(pMobs,"Figure ESP",function(s) F.figESP=s end)
+Tog(pMobs,"Figure авто-отход",function(s) F.figAvoid=s end)
+Sld(pMobs,"Figure радиус",5,40,15,function(v) F.figR=v end)
 
--- ── ИГРОКИ ───────────────────────────────────
-AddLabel(pagePlayers,"Визуал")
-AddToggle(pagePlayers,"ESP игроков (ники + обводка)", function(s)
-    playerESPEnabled=s
+-- Players tab
+Lbl(pPlayers,"Визуал")
+Tog(pPlayers,"ESP игроков (ники+обводка)",function(s)
+    F.plrESP=s
     if not s then
-        for _, plr in ipairs(Players:GetPlayers()) do
+        for _,plr in ipairs(Players:GetPlayers()) do
             if plr~=Player and plr.Character then
                 local hrp=plr.Character:FindFirstChild("HumanoidRootPart")
-                if hrp then RemoveESP(hrp,"PlayerESP") end
-                RemoveHighlight(plr.Character,"PlayerESP")
+                if hrp then RemESP(hrp,"PlayerESP") end
+                RemHL(plr.Character,"PlayerESP")
             end
         end
     end
 end)
-AddToggle(pagePlayers,"X-Ray (видеть сквозь стены)", function(s)
-    xrayEnabled = s
+Tog(pPlayers,"X-Ray (сквозь стены)",function(s)
+    F.xray=s
     if not s then
-        for _, obj in ipairs(Workspace:GetDescendants()) do
-            local hl = obj:FindFirstChild("_XRayHL")
-            if hl then hl:Destroy() end
+        for _,o in ipairs(Workspace:GetDescendants()) do
+            local h=o:FindFirstChild("_XHL"); if h then h:Destroy() end
         end
     end
 end)
-AddLabel(pagePlayers,"Движение")
-AddToggle(pagePlayers,"Кастомная скорость",         function(s) speedEnabled=s end)
-AddSlider(pagePlayers,"Скорость",16,60,16,          function(v) customSpeed=v end)
-AddSlider(pagePlayers,"FOV",50,120,70,              function(v) customFOV=v; Camera.FieldOfView=v end)
-AddLabel(pagePlayers,"Freecam")
-AddToggle(pagePlayers,"Freecam (WASD + мышь)", function(s)
-    freecamEnabled = s
+Lbl(pPlayers,"Движение")
+Tog(pPlayers,"Кастомная скорость",function(s) F.speed=s end)
+Sld(pPlayers,"Скорость",16,60,16,function(v) F.spd=v end)
+Sld(pPlayers,"FOV",50,120,70,function(v) F.fov=v; Camera.FieldOfView=v end)
+Lbl(pPlayers,"Freecam")
+Tog(pPlayers,"Freecam (WASD+мышь)",function(s)
+    F.freecam=s
     if s then StartFreecam() else StopFreecam() end
 end)
-AddToggle(pagePlayers,"Запись пути (хвостик)", function(s)
-    recordingPath = s
+Tog(pPlayers,"Запись пути (хвостик)",function(s)
+    F.recPath=s
     if s then
-        recordedPoints = {}
-        for _, p in ipairs(pathTrail) do pcall(function() p:Destroy() end) end
-        pathTrail = {}
+        recPoints={}
+        for _,p in ipairs(trail) do pcall(function() p:Destroy() end) end
+        trail={}
     end
 end)
-
-local playBtn2 = Instance.new("TextButton")
-playBtn2.Size = UDim2.new(1,0,0,33)
-playBtn2.BackgroundColor3 = Color3.fromRGB(30,30,40)
-playBtn2.Text = "  ▶  Воспроизвести путь"
-playBtn2.TextColor3 = Color3.fromRGB(100,200,255)
-playBtn2.TextSize = 12
-playBtn2.Font = Enum.Font.GothamSemibold
-playBtn2.TextXAlignment = Enum.TextXAlignment.Left
-playBtn2.AutoButtonColor = false
-playBtn2.Parent = pagePlayers
-Instance.new("UICorner",playBtn2).CornerRadius = UDim.new(0,7)
-playBtn2.MouseButton1Click:Connect(function()
-    if not isPlayingPath and #recordedPoints > 1 then PlayPath() end
+Btn(pPlayers,"▶  Воспроизвести путь",Color3.fromRGB(25,50,25),Color3.fromRGB(80,220,80),function()
+    if not playing and #recPoints>1 then PlayPath() end
 end)
-
-local stopBtn2 = Instance.new("TextButton")
-stopBtn2.Size = UDim2.new(1,0,0,33)
-stopBtn2.BackgroundColor3 = Color3.fromRGB(40,20,20)
-stopBtn2.Text = "  ■  Стоп"
-stopBtn2.TextColor3 = Color3.fromRGB(255,100,100)
-stopBtn2.TextSize = 12
-stopBtn2.Font = Enum.Font.GothamSemibold
-stopBtn2.TextXAlignment = Enum.TextXAlignment.Left
-stopBtn2.AutoButtonColor = false
-stopBtn2.Parent = pagePlayers
-Instance.new("UICorner",stopBtn2).CornerRadius = UDim.new(0,7)
-stopBtn2.MouseButton1Click:Connect(function()
-    isPlayingPath = false
-    if pathPlatform then pathPlatform:Destroy(); pathPlatform=nil end
+Btn(pPlayers,"■  Стоп путь",Color3.fromRGB(50,20,20),Color3.fromRGB(255,80,80),function()
+    playing=false
+    if pathPlt then pathPlt:Destroy(); pathPlt=nil end
 end)
-AddSlider(pagePlayers,"Скорость пути",4,50,16,function(v) pathPlaySpeed=v end)
-
-AddLabel(pagePlayers,"Прочее")
-AddToggle(pagePlayers,"Full Bright", function(s)
+Sld(pPlayers,"Скорость пути",4,50,16,function(v) pathSpd=v end)
+Lbl(pPlayers,"Прочее")
+Tog(pPlayers,"Full Bright",function(s)
     if s then
         game.Lighting.Brightness=2; game.Lighting.ClockTime=14
-        game.Lighting.GlobalShadows=false
-        game.Lighting.OutdoorAmbient=Color3.fromRGB(255,255,255)
+        game.Lighting.GlobalShadows=false; game.Lighting.OutdoorAmbient=Color3.fromRGB(255,255,255)
     else
         game.Lighting.Brightness=1; game.Lighting.ClockTime=0
-        game.Lighting.GlobalShadows=true
-        game.Lighting.OutdoorAmbient=Color3.fromRGB(127,127,127)
+        game.Lighting.GlobalShadows=true; game.Lighting.OutdoorAmbient=Color3.fromRGB(127,127,127)
     end
 end)
 
--- ── ТЕСТ ─────────────────────────────────────
-AddLabel(pageTest,"Скоро добавим...")
+-- Test tab (секрет /200)
+Lbl(pTest,"Напишите /200 в чат")
 
--- ── АРХИВЫ ───────────────────────────────────
-local waterPoolEnabled = false
-local waterPoolParts   = {} -- все созданные парты над пулами
+-- Floor2 tab
+Lbl(pFloor2,"Предметы")
+Tog(pFloor2,"Батарея ESP",function(s) F.battery=s end)
+Tog(pFloor2,"Нора (MouseHole) ESP",function(s) F.hole=s end)
+Lbl(pFloor2,"Монстры/Опасности")
+Tog(pFloor2,"GiggleCeiling ESP",function(s) F.giggle=s end)
+Tog(pFloor2,"Генераторы (MinesGenerator)",function(s) F.mines=s end)
+Tog(pFloor2,"Автоматы (MinesAnchor)",function(s) F.mines2=s end)
+Tog(pFloor2,"Big Grumble ESP",function(s) F.grumbo=s end)
+Tog(pFloor2,"Водяные вентили (WaterPump)",function(s) F.pump=s end)
 
-local pageNew = AddTab("📦","АРХИВЫ")
-AddLabel(pageNew,"Предметы из ивентов")
-AddToggle(pageNew,"Drones ESP (обводка)", function(s)
-    dronesESP = s
+-- Archives tab
+Lbl(pArchive,"Ивенты")
+Tog(pArchive,"Drones ESP (обводка)",function(s)
+    F.drones=s
     if s then
-        for _, obj in ipairs(Workspace:GetDescendants()) do
-            if obj.Name=="Drone" then
-                MakeHighlight(obj,"DroneESP",Color3.fromRGB(180,180,180))
-            end
+        for _,o in ipairs(Workspace:GetDescendants()) do
+            if o.Name=="Drone" then MakeHL(o,"DroneESP",Color3.fromRGB(180,180,180)) end
         end
     else
-        for _, obj in ipairs(Workspace:GetDescendants()) do
-            RemoveHighlight(obj,"DroneESP")
+        for _,o in ipairs(Workspace:GetDescendants()) do RemHL(o,"DroneESP") end
+    end
+end)
+Tog(pArchive,"DronesStampede — уведомление",function(s)
+    F.stampede=s
+    if s then
+        local st=Workspace:FindFirstChild("DronesStampede",true)
+        if st then Notif("🦬 СТАДА!","Стадо уже в мире!") end
+    end
+end)
+Tog(pArchive,"Drops ESP (лазер/ланчбокс/кава/пицца)",function(s)
+    F.drops=s
+    if s then
+        for _,o in ipairs(Workspace:GetChildren()) do
+            if o.Name=="Drops" then HandleDrop(o) end
         end
     end
 end)
-AddToggle(pageNew,"DronesStampede — уведомление (Стада)", function(s)
-    -- просто флаг, логика в Workspace.ChildAdded ниже
-    -- при включении проверяем уже существующий
-    if s then
-        local st = Workspace:FindFirstChild("DronesStampede", true)
-        if st then SendNotif("🦬 СТАДА!", "DronesStampede уже в мире!") end
-    end
+Tog(pArchive,"Золото (Loot) ESP",function(s)
+    F.gold=s
+    if s then ScanGold() end
 end)
-AddToggle(pageNew,"Drops ESP (лазер/ланчбокс/кава/пицца)", function(s)
-    dropsESP = s
-    if s then
-        for _, obj in ipairs(Workspace:GetChildren()) do
-            if obj.Name=="Drops" then HandleDrop(obj) end
-        end
-    end
-end)
-AddToggle(pageNew,"Золото (Loot) ESP", function(s)
-    goldLootESP = s
+Tog(pArchive,"Кульер (ArchivesWaterCooler) ESP",function(s)
+    F.cooler=s
     if s then
         ScanRooms(function(d)
-            if d.Name=="FloorLootItem" then
-                local gp = d:FindFirstChild("GoldPile",true)
-                if gp then
-                    local part = GetPrimaryPart(gp) or gp:FindFirstChildWhichIsA("BasePart",true)
-                    if part then
-                        MakeESP(part,"GoldLootESP","💰 ЗОЛОТО",Color3.fromRGB(255,215,0))
-                        MakeHighlight(gp,"GoldLootESP",Color3.fromRGB(255,215,0))
-                    end
-                end
-            end
-        end)
-    else
-        ScanRooms(function(d)
-            if d.Name=="FloorLootItem" then
-                local gp = d:FindFirstChild("GoldPile",true)
-                if gp then
-                    RemoveESP(GetPrimaryPart(gp),"GoldLootESP")
-                    RemoveHighlight(gp,"GoldLootESP")
-                end
+            if d.Name=="ArchivesWaterCooler" then
+                ItemESP(d,"CoolerESP","🧊 КУЛЬЕР",Color3.fromRGB(100,200,255))
             end
         end)
     end
 end)
-AddLabel(pageNew,"Вода (архив-контент)")
-AddToggle(pageNew,"Water пулы — маркер над водой", function(s)
-    waterPoolEnabled = s
+Lbl(pArchive,"BashMoving")
+Tog(pArchive,"Bash — уведомление при появлении",function(s) F.bashNotif=s end)
+Tog(pArchive,"Bash → плавно вниз -16 блоков",function(s) F.bash=s end)
+Lbl(pArchive,"События")
+Tog(pArchive,"Scribbles — уведомление",function(s) F.scribbles=s end)
+Tog(pArchive,"Ransom — заморозка игрока",function(s) F.ransom=s end)
+Tog(pArchive,"Water пулы — маркер над водой",function(s)
+    F.waterPool=s
     if not s then
-        -- Убираем все маркеры
-        for _, p in ipairs(waterPoolParts) do
-            pcall(function() p:Destroy() end)
-        end
-        waterPoolParts = {}
+        for _,p in ipairs(poolParts) do pcall(function() p:Destroy() end) end
+        poolParts={}
     else
-        -- Сканируем уже загруженные комнаты
         ScanWaterPools()
     end
 end)
 
--- ── 2 ЭТАЖ ───────────────────────────────────
-local floor2ESPEnabled   = false
-local gigglesESP         = false
-local batteryESP         = false
-local minesESP           = false
-local grumboESP          = false
-local waterpumpESP       = false
-
-local mouseHoleESP       = false
-
-local pageFloor2 = AddTab("🏚","2 ЭТАЖ")
-AddLabel(pageFloor2,"Предметы")
-AddToggle(pageFloor2,"Батарея ESP + обводка",        function(s) batteryESP=s end)
-AddToggle(pageFloor2,"Нора (MouseHole) ESP",         function(s) mouseHoleESP=s end)
-AddLabel(pageFloor2,"Монстры / Опасности")
-AddToggle(pageFloor2,"GiggleCeiling ESP + обводка",  function(s) gigglesESP=s end)
-AddToggle(pageFloor2,"Генераторы (MinesGenerator)",  function(s) minesESP=s end)
-AddToggle(pageFloor2,"Автоматы (MinesAnchor) ESP",   function(s) floor2ESPEnabled=s end)
-AddToggle(pageFloor2,"Big Grumble ESP + обводка",    function(s) grumboESP=s end)
-AddToggle(pageFloor2,"Водяные насосы (комн.100) ESP",function(s) waterpumpESP=s end)
-
 SelectTab("ЕСП")
 
--- ══════════════════════════════════════════════
---  ESP CORE
--- ══════════════════════════════════════════════
-local function GetPrimaryPart(obj)
+-- ── ESP CORE ───────────────────────────────────────────
+local function GPP(obj)
     if obj:IsA("BasePart") then return obj end
     return obj:FindFirstChildWhichIsA("BasePart",true)
 end
 
-local function MakeESP(part, tag, text, color)
+local function MakeESP(part,tag,text,color)
     if not part or not part.Parent then return end
     if part:FindFirstChild(tag) then return end
-    local bill = Instance.new("BillboardGui")
-    bill.Name=tag; bill.Size=UDim2.new(0,150,0,40)
-    bill.AlwaysOnTop=true; bill.StudsOffset=Vector3.new(0,3.5,0)
-    bill.Adornee=part; bill.Parent=part
-    local lbl=Instance.new("TextLabel")
-    lbl.Size=UDim2.new(1,0,1,0); lbl.BackgroundTransparency=1
-    lbl.Text=text; lbl.TextColor3=color
-    lbl.TextStrokeTransparency=0; lbl.TextStrokeColor3=Color3.new(0,0,0)
-    lbl.TextSize=14; lbl.Font=Enum.Font.GothamBold; lbl.Parent=bill
+    local b=Instance.new("BillboardGui"); b.Name=tag
+    b.Size=UDim2.new(0,150,0,38); b.AlwaysOnTop=true
+    b.StudsOffset=Vector3.new(0,3.5,0); b.Adornee=part; b.Parent=part
+    local l=Instance.new("TextLabel"); l.Size=UDim2.new(1,0,1,0)
+    l.BackgroundTransparency=1; l.Text=text; l.TextColor3=color
+    l.TextStrokeTransparency=0; l.TextStrokeColor3=Color3.new(0,0,0)
+    l.TextSize=14; l.Font=Enum.Font.GothamBold; l.Parent=b
 end
 
-local function RemoveESP(part, tag)
+local function RemESP(part,tag)
     if not part then return end
     local b=part:FindFirstChild(tag); if b then b:Destroy() end
 end
 
-local function MakeHighlight(model, tag, color)
+local function MakeHL(model,tag,color)
     if not model or not model.Parent then return end
     if model:FindFirstChild(tag.."_HL") then return end
-    local hl=Instance.new("Highlight")
-    hl.Name=tag.."_HL"; hl.Adornee=model
-    hl.FillColor=color; hl.OutlineColor=color
-    hl.FillTransparency=0.65; hl.OutlineTransparency=0
-    hl.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop
-    hl.Parent=model
+    local h=Instance.new("Highlight"); h.Name=tag.."_HL"
+    h.Adornee=model; h.FillColor=color; h.OutlineColor=color
+    h.FillTransparency=0.65; h.OutlineTransparency=0
+    h.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop; h.Parent=model
 end
 
-local function RemoveHighlight(model, tag)
+local function RemHL(model,tag)
     if not model then return end
     local h=model:FindFirstChild(tag.."_HL"); if h then h:Destroy() end
 end
 
-local function MakeItemESP(model, tag, label, color)
+local function ItemESP(model,tag,label,color)
     task.spawn(function()
-        task.wait(0.1)
-        if not model.Parent then return end
-        local part=GetPrimaryPart(model)
-        if not part then return end
+        task.wait(0.15)
+        if not model or not model.Parent then return end
+        local part=GPP(model); if not part then return end
         if part:FindFirstChild(tag) then return end
         MakeESP(part,tag,label,color)
-        MakeHighlight(model,tag,color)
+        MakeHL(model,tag,color)
         model.AncestryChanged:Connect(function()
-            if not model.Parent then RemoveESP(part,tag); RemoveHighlight(model,tag) end
+            if not model.Parent then RemESP(part,tag); RemHL(model,tag) end
         end)
     end)
 end
 
-local function RemoveItemESP(model, tag)
-    RemoveESP(GetPrimaryPart(model),tag)
-    RemoveHighlight(model,tag)
-end
-
--- ══════════════════════════════════════════════
---  DOOR LOGIC
---  Door — прямой ребёнок комнаты, без dupeDoor внутри
--- ══════════════════════════════════════════════
+-- ── DOOR LOGIC ─────────────────────────────────────────
 local function HandleDoor(door)
     task.spawn(function()
-        task.wait(0.3) -- ждём чтобы dupeDoor успел загрузиться
+        task.wait(0.3)
         if not door.Parent then return end
         if door:FindFirstChild("dupeDoor") then return end
-        local part = GetPrimaryPart(door)
-        if not part then return end
+        local part=GPP(door); if not part then return end
         if part:FindFirstChild("DoorsESP") then return end
         MakeESP(part,"DoorsESP","✅ ПРАВИЛЬНАЯ",Color3.fromRGB(60,255,60))
-        MakeHighlight(door,"DoorsESP",Color3.fromRGB(60,255,60))
+        MakeHL(door,"DoorsESP",Color3.fromRGB(60,255,60))
         door.AncestryChanged:Connect(function()
-            if not door.Parent then
-                RemoveESP(part,"DoorsESP")
-                RemoveHighlight(door,"DoorsESP")
-            end
+            if not door.Parent then RemESP(part,"DoorsESP"); RemHL(door,"DoorsESP") end
         end)
     end)
 end
 
--- ══════════════════════════════════════════════
---  ITEMS TABLE (новые предметы)
---  Формат: {parentName, childName, partName, label, color}
---  parentName = имя родителя (Table / RolltopContainer / SmoothieSpawner / AlarmClock)
---  childName  = имя ребёнка (Handle / GoldPile / Lighter / Vitamins / Smoothive / Candle / Main / nil)
---  partName   = имя BasePart внутри (Handle / Hitbox / Main / nil = любой)
--- ══════════════════════════════════════════════
--- Логика: находим parentName → ищем childName (если указан) → ищем partName или GetPrimaryPart
-
-local ITEMS = {
-    -- Пластырь: Table > Handle
-    {parent="Table",    child="Handle",        part=nil,     label="🩹 ПЛАСТЫРЬ",  color=Color3.fromRGB(255,180,100)},
-    -- Свеча: Table > Candle > Handle
-    {parent="Table",    child="Candle",         part="Handle",label="🕯 СВЕЧА",     color=Color3.fromRGB(255,240,150)},
-    -- Зажигалка: RolltopContainer > Lighter > Main
-    {parent="RolltopContainer", child="Lighter",part="Main",  label="🔥 ЗАЖИГАЛКА",color=Color3.fromRGB(255,120,30)},
-    -- Витамины: RolltopContainer > Vitamins > Main
-    {parent="RolltopContainer", child="Vitamins",part="Main", label="💊 ВИТАМИНЫ",  color=Color3.fromRGB(160,255,80)},
-    -- Сок: SmoothieSpawner > Smoothive > Main
-    {parent="SmoothieSpawner",  child="Smoothive",part="Main",label="🥤 СОК",       color=Color3.fromRGB(100,220,100)},
-    -- Будильник: AlarmClock > Main
-    {parent="AlarmClock",       child="Main",   part=nil,     label="⏰ БУДИЛЬНИК", color=Color3.fromRGB(200,200,255)},
+-- ── ITEMS TABLE ────────────────────────────────────────
+-- Все предметы лежат в: комната > Assets > Loot > FloorLootItem > <модель>
+-- Ключи таблицы — имя модели ВНУТРИ FloorLootItem
+local LOOT_ITEMS={
+    {name="Handle",   parent="Table",              label="🩹 ПЛАСТЫРЬ",  col=Color3.fromRGB(255,180,100)},
+    {name="Candle",   parent="Table",              label="🕯 СВЕЧА",     col=Color3.fromRGB(255,240,150), part="Handle"},
+    {name="Lighter",  parent="RolltopContainer",   label="🔥 ЗАЖИГАЛКА", col=Color3.fromRGB(255,120,30),  part="Main"},
+    {name="Vitamins", parent="RolltopContainer",   label="💊 ВИТАМИНЫ",  col=Color3.fromRGB(160,255,80),  part="Main"},
+    {name="Smoothive",parent="SmoothieSpawner",    label="🥤 СОК",       col=Color3.fromRGB(100,220,100), part="Main"},
+    {name="Main",     parent="AlarmClock",         label="⏰ БУДИЛЬНИК", col=Color3.fromRGB(200,200,255)},
 }
-
--- Быстрый lookup: parentName → список правил
-local ITEMS_BY_PARENT = {}
-for _, rule in ipairs(ITEMS) do
-    if not ITEMS_BY_PARENT[rule.parent] then ITEMS_BY_PARENT[rule.parent] = {} end
-    table.insert(ITEMS_BY_PARENT[rule.parent], rule)
+-- Lookup по имени модели
+local LOOT_BY_NAME={}
+for _,r in ipairs(LOOT_ITEMS) do
+    if not LOOT_BY_NAME[r.name] then LOOT_BY_NAME[r.name]={} end
+    table.insert(LOOT_BY_NAME[r.name],r)
 end
 
-local function TryItemESP(desc)
-    if not itemsESP then return end
-    local rules = ITEMS_BY_PARENT[desc.Name]
-    if not rules then return end
-    for _, rule in ipairs(rules) do
-        -- Ищем child
-        local target
-        if rule.child then
-            target = desc:FindFirstChild(rule.child)
-        else
-            target = desc
-        end
-        if target then
-            -- Ищем part
-            local part
-            if rule.part then
-                part = target:FindFirstChild(rule.part)
-            else
-                part = GetPrimaryPart(target) or target
-            end
-            if part then
-                MakeESP(part, "ItemESP_"..rule.label, rule.label, rule.color)
-                MakeHighlight(target, "ItemESP_"..rule.label, rule.color)
-                target.AncestryChanged:Connect(function()
-                    if not target.Parent then
-                        RemoveESP(part, "ItemESP_"..rule.label)
-                        RemoveHighlight(target, "ItemESP_"..rule.label)
+-- Обрабатываем FloorLootItem — ищем все известные предметы внутри
+local function HandleFloorLootItem(item)
+    if not F.items then return end
+    task.spawn(function()
+        task.wait(0.2)
+        if not item.Parent then return end
+        for _,child in ipairs(item:GetDescendants()) do
+            local rules=LOOT_BY_NAME[child.Name]
+            if rules then
+                for _,r in ipairs(rules) do
+                    local tgt=r.part and child:FindFirstChild(r.part) or child
+                    local part=GPP(tgt) or (tgt:IsA("BasePart") and tgt)
+                    if part and not part:FindFirstChild("LootESP_"..r.label) then
+                        MakeESP(part,"LootESP_"..r.label,r.label,r.col)
+                        MakeHL(child,"LootESP_"..r.label,r.col)
+                        child.AncestryChanged:Connect(function()
+                            if not child.Parent then
+                                RemESP(part,"LootESP_"..r.label)
+                                RemHL(child,"LootESP_"..r.label)
+                            end
+                        end)
                     end
-                end)
+                end
             end
         end
-    end
+    end)
 end
 
--- ══════════════════════════════════════════════
---  DESCENDANT HANDLER
--- ══════════════════════════════════════════════
-local function HandleDescendant(desc)
-    if desc.Name == "Door" and desc:IsA("Model") then
-        if doorsESPEnabled then HandleDoor(desc) end
-        return
+local function TryItem(desc)
+    if desc.Name=="FloorLootItem" then HandleFloorLootItem(desc) end
+end
+
+-- ── DESCENDANT HANDLER ────────────────────────────────
+local function HandleDesc(desc)
+    if desc.Name=="Door" and desc:IsA("Model") then
+        if F.doors then HandleDoor(desc) end; return
     end
-    if desc.Name == "KeyObtain" and keyESPEnabled then
-        MakeItemESP(desc,"KeyESP","🔑 КЛЮЧ",Color3.fromRGB(255,220,0)); return
-    end
-    if (desc.Name=="Dresser" or desc.Name=="DrawerContainer") and keyESPEnabled then
+    if desc.Name=="KeyObtain" and F.key then ItemESP(desc,"KeyESP","🔑 КЛЮЧ",Color3.fromRGB(255,220,0)); return end
+    if (desc.Name=="Dresser" or desc.Name=="DrawerContainer") and F.key then
         local k=desc:FindFirstChild("KeyObtain",true)
-        if k then MakeItemESP(k,"KeyESP","🔑 КЛЮЧ",Color3.fromRGB(255,220,0)) end
-        return
+        if k then ItemESP(k,"KeyESP","🔑 КЛЮЧ",Color3.fromRGB(255,220,0)) end; return
     end
-    if desc.Name=="LeverForGate" and leverESPEnabled then
-        local part=GetPrimaryPart(desc)
-        if part then
-            MakeESP(part,"LeverESP","🔧 РЫЧАГ",Color3.fromRGB(255,255,0))
-            MakeHighlight(desc,"LeverESP",Color3.fromRGB(255,255,0))
-            desc.AncestryChanged:Connect(function()
-                if not desc.Parent then RemoveESP(part,"LeverESP"); RemoveHighlight(desc,"LeverESP") end
-            end)
-        end
-        return
+    if desc.Name=="LeverForGate" and F.lever then
+        local part=GPP(desc)
+        if part then MakeESP(part,"LeverESP","🔧 РЫЧАГ",Color3.fromRGB(255,255,0)) end
+        MakeHL(desc,"LeverESP",Color3.fromRGB(255,255,0))
+        desc.AncestryChanged:Connect(function()
+            if not desc.Parent then RemESP(GPP(desc),"LeverESP"); RemHL(desc,"LeverESP") end
+        end); return
     end
-    if desc.Name=="LiveHintBook" and booksESP then
-        MakeItemESP(desc,"BookESP","📖 КНИГА",Color3.fromRGB(0,210,255)); return
+    if desc.Name=="LiveHintBook" and F.books then ItemESP(desc,"BookESP","📖 КНИГА",Color3.fromRGB(0,210,255)); return end
+    if desc.Name=="CrucifixWall" and F.crucifix then ItemESP(desc,"CrucifixESP","✝ КРЕСТ",Color3.fromRGB(255,200,50)); return end
+    if desc.Name=="Snare" and F.snare then
+        local b=desc:FindFirstChild("SnareBase") or desc; local p=GPP(b) or b
+        MakeESP(p,"SnareESP","⚠ ЛОВУШКА",Color3.fromRGB(255,128,0)); return
     end
-    if desc.Name=="CrucifixWall" and crucifixESP then
-        MakeItemESP(desc,"CrucifixESP","✝ КРЕСТ",Color3.fromRGB(255,200,50)); return
+    if desc.Name=="LiveBreakerPolePickup" and F.poles then
+        MakeESP(GPP(desc) or desc,"PoleESP","⚡ РЫЧАГ 100",Color3.fromRGB(60,255,60)); return
     end
-    if desc.Name=="Snare" and snareESP then
-        local base=desc:FindFirstChild("SnareBase") or desc
-        local part=GetPrimaryPart(base) or base
-        MakeESP(part,"SnareESP","⚠ ЛОВУШКА",Color3.fromRGB(255,128,0)); return
-    end
-    if desc.Name=="LiveBreakerPolePickup" and polesESP then
-        local part=GetPrimaryPart(desc) or desc
-        MakeESP(part,"PoleESP","⚡ РЫЧАГ 100",Color3.fromRGB(60,255,60)); return
-    end
-
-    -- ── 2 ЭТАЖ ──────────────────────────────
-
-    -- Нора мыши: Assets > MouseHole
-    if desc.Name=="MouseHole" and mouseHoleESP then
-        MakeItemESP(desc,"MouseHoleESP","🕳 НОРА",Color3.fromRGB(180,120,60))
-        return
-    end
-
-    -- Батарея: Assets > Locker_Small > Battery
-    if desc.Name=="Locker_Small" and batteryESP then
+    if desc.Name=="MouseHole" and F.hole then ItemESP(desc,"HoleESP","🕳 НОРА",Color3.fromRGB(180,120,60)); return end
+    if desc.Name=="Locker_Small" and F.battery then
         local bat=desc:FindFirstChild("Battery",true)
-        if bat then MakeItemESP(bat,"BatteryESP","🔋 БАТАРЕЯ",Color3.fromRGB(100,255,100)) end
-        return
+        if bat then ItemESP(bat,"BatESP","🔋 БАТАРЕЯ",Color3.fromRGB(100,255,100)) end; return
     end
-
-    -- GiggleCeiling — в Assets комнаты
-    if desc.Name=="GiggleCeiling" and gigglesESP then
-        MakeItemESP(desc,"GiggleESP","😂 ГИГГЛ",Color3.fromRGB(255,80,200)); return
-    end
-
-    -- MinesGenerator — в Assets комнаты
-    if desc.Name=="MinesGenerator" and minesESP then
-        MakeItemESP(desc,"MinesGenESP","⚙ ГЕНЕРАТОР",Color3.fromRGB(255,165,0)); return
-    end
-
-    -- MinesAnchor — прямо внутри _NestHandler (который в комнате/Assets)
-    if desc.Name=="MinesAnchor" and floor2ESPEnabled then
-        MakeItemESP(desc,"MinesAnchorESP","🔫 АВТОМАТ",Color3.fromRGB(255,50,50)); return
-    end
-
-    -- Grumbo — внутри Grumbles > _NestHandler
-    if desc.Name=="Grumbo" and grumboESP then
-        -- Grumbo это Model — ищем любой BasePart внутри для надписи
-        local part = desc:FindFirstChildWhichIsA("BasePart", true)
-        if part then
-            MakeESP(part,"GrumboESP","👾 BIG GRUMBLE",Color3.fromRGB(200,0,255))
-        end
-        -- Highlight прямо на модель Grumbo
-        if desc:IsA("Model") then
-            MakeHighlight(desc,"GrumboESP",Color3.fromRGB(200,0,255))
-        end
+    if desc.Name=="GiggleCeiling" and F.giggle then ItemESP(desc,"GigESP","😂 ГИГГЛ",Color3.fromRGB(255,80,200)); return end
+    if desc.Name=="MinesGenerator" and F.mines then ItemESP(desc,"MGenESP","⚙ ГЕНЕРАТОР",Color3.fromRGB(255,165,0)); return end
+    if desc.Name=="MinesAnchor" and F.mines2 then ItemESP(desc,"MAncESP","🔫 АВТОМАТ",Color3.fromRGB(255,50,50)); return end
+    if desc.Name=="Grumbo" and F.grumbo then
+        local part=desc:FindFirstChildWhichIsA("BasePart",true)
+        if part then MakeESP(part,"GrumboESP","👾 BIG GRUMBLE",Color3.fromRGB(200,0,255)) end
+        if desc:IsA("Model") then MakeHL(desc,"GrumboESP",Color3.fromRGB(200,0,255)) end
         desc.AncestryChanged:Connect(function()
-            if not desc.Parent then
-                if part then RemoveESP(part,"GrumboESP") end
-                RemoveHighlight(desc,"GrumboESP")
-            end
-        end)
+            if not desc.Parent then RemESP(part,"GrumboESP"); RemHL(desc,"GrumboESP") end
+        end); return
+    end
+    if (desc.Name=="WaterPump" or desc.Name=="Waterfall") and F.pump then
+        local tgt=desc:IsA("Model") and desc or desc.Parent
+        local part=desc:FindFirstChildWhichIsA("BasePart",true) or (desc:IsA("BasePart") and desc)
+        if part then MakeESP(part,"PumpESP","💧 ВЕНТИЛЬ",Color3.fromRGB(0,180,255)) end
+        if tgt and tgt:IsA("Model") then MakeHL(tgt,"PumpESP",Color3.fromRGB(0,180,255)) end
         return
     end
-
-    -- Вентили/насосы 100 комнаты — WaterPump или Waterfall
-    if (desc.Name=="WaterPump" or desc.Name=="Waterfall") and waterpumpESP then
-        local target = desc:IsA("Model") and desc or desc.Parent
-        local part = desc:FindFirstChildWhichIsA("BasePart",true) or (desc:IsA("BasePart") and desc)
-        if part then
-            MakeESP(part,"WaterPumpESP","💧 ВЕНТИЛЬ",Color3.fromRGB(0,180,255))
-        end
-        if target and target:IsA("Model") then
-            MakeHighlight(target,"WaterPumpESP",Color3.fromRGB(0,180,255))
-        end
-        desc.AncestryChanged:Connect(function()
-            if not desc.Parent then
-                if part then RemoveESP(part,"WaterPumpESP") end
-                if target then RemoveHighlight(target,"WaterPumpESP") end
-            end
-        end)
-        return
+    if desc.Name=="ArchivesWaterCooler" and F.cooler then
+        ItemESP(desc,"CoolerESP","🧊 КУЛЬЕР",Color3.fromRGB(100,200,255)); return
     end
-
-    -- Золото в Loot: Assets > Loot > FloorLootItem > GoldPile
-    if desc.Name=="FloorLootItem" and goldLootESP then
-        local gp = desc:FindFirstChild("GoldPile",true)
-        if gp then
-            local part = GetPrimaryPart(gp) or gp:FindFirstChildWhichIsA("BasePart",true)
-            if part then
-                MakeESP(part,"GoldLootESP","💰 ЗОЛОТО",Color3.fromRGB(255,215,0))
-                MakeHighlight(gp,"GoldLootESP",Color3.fromRGB(255,215,0))
-                desc.AncestryChanged:Connect(function()
-                    if not desc.Parent then
-                        RemoveESP(part,"GoldLootESP")
-                        RemoveHighlight(gp,"GoldLootESP")
-                    end
-                end)
+    if desc.Name=="FloorLootItem" and F.gold then
+        task.spawn(function()
+            task.wait(0.3)
+            if not desc.Parent then return end
+            local gp=desc:FindFirstChild("GoldPile",true); if not gp then return end
+            local part=GPP(gp) or gp:FindFirstChildWhichIsA("BasePart",true)
+            if part and not part:FindFirstChild("GoldESP") then
+                MakeESP(part,"GoldESP","💰 ЗОЛОТО",Color3.fromRGB(255,215,0))
+                MakeHL(gp,"GoldESP",Color3.fromRGB(255,215,0))
             end
-        end
-        return
+        end); return
     end
-
-    -- Новые предметы
-    TryItemESP(desc)
+    if desc.Name=="GoldPile" and F.gold then
+        local part=GPP(desc) or desc:FindFirstChildWhichIsA("BasePart",true)
+        if part and not part:FindFirstChild("GoldESP") then
+            MakeESP(part,"GoldESP","💰 ЗОЛОТО",Color3.fromRGB(255,215,0))
+            MakeHL(desc,"GoldESP",Color3.fromRGB(255,215,0))
+        end; return
+    end
+    TryItem(desc)
 end
 
--- ══════════════════════════════════════════════
---  REFRESH FUNCTIONS
--- ══════════════════════════════════════════════
-local currentRooms = Workspace:FindFirstChild("CurrentRooms")
+-- ── REFRESH ────────────────────────────────────────────
+local currentRooms=Workspace:FindFirstChild("CurrentRooms")
 
 local function ScanRooms(fn)
     if not currentRooms then return end
-    for _, room in ipairs(currentRooms:GetChildren()) do
-        for _, desc in ipairs(room:GetDescendants()) do fn(desc) end
+    for _,room in ipairs(currentRooms:GetChildren()) do
+        for _,desc in ipairs(room:GetDescendants()) do fn(desc) end
     end
+end
+
+function ScanGold()
+    ScanRooms(function(d)
+        if d.Name=="FloorLootItem" or d.Name=="GoldPile" then HandleDesc(d) end
+    end)
 end
 
 function refreshDoorsESP()
     if not currentRooms then return end
-    for _, room in ipairs(currentRooms:GetChildren()) do
-        for _, child in ipairs(room:GetChildren()) do
-            if child.Name=="Door" and child:IsA("Model") then
-                local part=GetPrimaryPart(child)
-                if doorsESPEnabled then HandleDoor(child)
-                else RemoveESP(part,"DoorsESP"); RemoveHighlight(child,"DoorsESP") end
+    for _,room in ipairs(currentRooms:GetChildren()) do
+        for _,ch in ipairs(room:GetChildren()) do
+            if ch.Name=="Door" and ch:IsA("Model") then
+                if F.doors then HandleDoor(ch) else RemESP(GPP(ch),"DoorsESP"); RemHL(ch,"DoorsESP") end
             end
         end
     end
 end
+function refreshKeysESP() ScanRooms(function(d) if d.Name=="KeyObtain" then if F.key then ItemESP(d,"KeyESP","🔑 КЛЮЧ",Color3.fromRGB(255,220,0)) else RemHL(d,"KeyESP") end end end) end
+function refreshLeverESP() ScanRooms(function(d) if d.Name=="LeverForGate" then local p=GPP(d) if F.lever then if p then MakeESP(p,"LeverESP","🔧 РЫЧАГ",Color3.fromRGB(255,255,0)) end MakeHL(d,"LeverESP",Color3.fromRGB(255,255,0)) else RemESP(p,"LeverESP"); RemHL(d,"LeverESP") end end end) end
+function refreshBooksESP() ScanRooms(function(d) if d.Name=="LiveHintBook" then if F.books then ItemESP(d,"BookESP","📖 КНИГА",Color3.fromRGB(0,210,255)) else RemHL(d,"BookESP") end end end) end
+function refreshCrucifixESP() ScanRooms(function(d) if d.Name=="CrucifixWall" then if F.crucifix then ItemESP(d,"CrucifixESP","✝ КРЕСТ",Color3.fromRGB(255,200,50)) else RemHL(d,"CrucifixESP") end end end) end
+function refreshItemsESP() ScanRooms(TryItem) end
 
-function refreshKeysESP()
-    ScanRooms(function(d)
-        if d.Name=="KeyObtain" then
-            if keyESPEnabled then MakeItemESP(d,"KeyESP","🔑 КЛЮЧ",Color3.fromRGB(255,220,0))
-            else RemoveItemESP(d,"KeyESP") end
-        end
-    end)
-end
-
-function refreshLeverESP()
-    ScanRooms(function(d)
-        if d.Name=="LeverForGate" then
-            local part=GetPrimaryPart(d)
-            if leverESPEnabled then
-                if part then MakeESP(part,"LeverESP","🔧 РЫЧАГ",Color3.fromRGB(255,255,0)) end
-                MakeHighlight(d,"LeverESP",Color3.fromRGB(255,255,0))
-            else RemoveESP(part,"LeverESP"); RemoveHighlight(d,"LeverESP") end
-        end
-    end)
-end
-
-function refreshBooksESP()
-    ScanRooms(function(d)
-        if d.Name=="LiveHintBook" then
-            if booksESP then MakeItemESP(d,"BookESP","📖 КНИГА",Color3.fromRGB(0,210,255))
-            else RemoveItemESP(d,"BookESP") end
-        end
-    end)
-end
-
-function refreshCrucifixESP()
-    ScanRooms(function(d)
-        if d.Name=="CrucifixWall" then
-            if crucifixESP then MakeItemESP(d,"CrucifixESP","✝ КРЕСТ",Color3.fromRGB(255,200,50))
-            else RemoveItemESP(d,"CrucifixESP") end
-        end
-    end)
-end
-
-function refreshItemsESP()
-    ScanRooms(function(d) TryItemESP(d) end)
-end
-
--- ══════════════════════════════════════════════
---  ROOM SUBSCRIPTION
--- ══════════════════════════════════════════════
-SubscribeRoom = function(room)
-    -- Двери — прямые дети
-    for _, child in ipairs(room:GetChildren()) do
-        if child.Name=="Door" and child:IsA("Model") and doorsESPEnabled then HandleDoor(child) end
+-- ── ROOM SUBSCRIPTION ──────────────────────────────────
+SubscribeRoom=function(room)
+    for _,ch in ipairs(room:GetChildren()) do
+        if ch.Name=="Door" and ch:IsA("Model") and F.doors then HandleDoor(ch) end
     end
-    room.ChildAdded:Connect(function(child)
-        if child.Name=="Door" and child:IsA("Model") and doorsESPEnabled then HandleDoor(child) end
-        HandleDescendant(child)
-        -- Water
-        if child.Name=="Water" and waterPoolEnabled then HandleWater(child) end
-        if child.Name=="Assets" then
-            child.ChildAdded:Connect(function(asset)
-                if asset.Name=="Water" and waterPoolEnabled then HandleWater(asset) end
-            end)
-            for _, asset in ipairs(child:GetChildren()) do
-                if asset.Name=="Water" and waterPoolEnabled then HandleWater(asset) end
-            end
-        end
+    for _,desc in ipairs(room:GetDescendants()) do HandleDesc(desc) end
+    room.ChildAdded:Connect(function(ch)
+        if ch.Name=="Door" and ch:IsA("Model") and F.doors then HandleDoor(ch) end
+        HandleDesc(ch)
     end)
-    -- Всё остальное
-    for _, desc in ipairs(room:GetDescendants()) do HandleDescendant(desc) end
-    room.DescendantAdded:Connect(HandleDescendant)
-    -- Water уже в комнате
-    local assets = room:FindFirstChild("Assets")
+    room.DescendantAdded:Connect(HandleDesc)
+    local assets=room:FindFirstChild("Assets")
     if assets then
-        for _, obj in ipairs(assets:GetChildren()) do
-            if obj.Name=="Water" and waterPoolEnabled then HandleWater(obj) end
+        for _,o in ipairs(assets:GetChildren()) do
+            if o.Name=="Water" and F.waterPool then HandleWater(o) end
         end
+        assets.ChildAdded:Connect(function(o)
+            if o.Name=="Water" and F.waterPool then HandleWater(o) end
+        end)
     end
 end
 
 if currentRooms then
-    for _, room in ipairs(currentRooms:GetChildren()) do SubscribeRoom(room) end
+    for _,room in ipairs(currentRooms:GetChildren()) do SubscribeRoom(room) end
     currentRooms.ChildAdded:Connect(SubscribeRoom)
 else
-    Workspace.ChildAdded:Connect(function(child)
-        if child.Name=="CurrentRooms" then
-            currentRooms=child
-            for _, room in ipairs(child:GetChildren()) do SubscribeRoom(room) end
-            child.ChildAdded:Connect(SubscribeRoom)
+    Workspace.ChildAdded:Connect(function(ch)
+        if ch.Name=="CurrentRooms" then
+            currentRooms=ch
+            for _,room in ipairs(ch:GetChildren()) do SubscribeRoom(room) end
+            ch.ChildAdded:Connect(SubscribeRoom)
         end
     end)
 end
 
--- Screech
+-- ── SCREECH ────────────────────────────────────────────
 Workspace.DescendantAdded:Connect(function(desc)
     if screechNames[desc.Name] then
-        activeSreech=desc
-        if screechNotif then SendNotif("😱 SCREECH!","Скрич появился!") end
+        activeScreech=desc
+        if F.screechNotif then Notif("😱 SCREECH!","Скрич!") end
         desc.AncestryChanged:Connect(function()
-            if not desc.Parent and activeSreech==desc then activeSreech=nil end
+            if not desc.Parent and activeScreech==desc then activeScreech=nil end
+        end)
+    end
+    if desc.Name=="Drone" and F.drones then
+        MakeHL(desc,"DroneESP",Color3.fromRGB(180,180,180))
+        desc.AncestryChanged:Connect(function() if not desc.Parent then RemHL(desc,"DroneESP") end end)
+    end
+    if desc.Name=="DronesStampede" and F.stampede then
+        Notif("🦬 СТАДА!","Появилось стадо дронов!")
+    end
+    if desc.Name=="Scribbles" and F.scribbles then
+        Notif("✏️ SCRIBBLES!","Scribbles появился в мире!")
+        desc.AncestryChanged:Connect(function()
+            if not desc.Parent then Notif("✏️ Scribbles","Scribbles исчез") end
+        end)
+    end
+    if desc.Name=="Ransom" then
+        if F.ransom then
+            -- Полная заморозка: скорость 0, прыжки 0, камера scriptable
+            Notif("🔒 RANSOM","Заморожен!")
+            if Humanoid then
+                Humanoid.WalkSpeed=0
+                Humanoid.JumpPower=0
+                Humanoid.JumpHeight=0
+            end
+            -- Блокируем ввод мыши
+            UIS.MouseBehavior=Enum.MouseBehavior.LockCurrentPosition
+            Camera.CameraType=Enum.CameraType.Scriptable
+            local frozenCF=Camera.CFrame
+            local freezeConn; freezeConn=RunService.RenderStepped:Connect(function()
+                if not desc.Parent then
+                    freezeConn:Disconnect()
+                    -- Размораживаем
+                    if Humanoid then
+                        Humanoid.WalkSpeed=F.speed and F.spd or 16
+                        Humanoid.JumpPower=50
+                        Humanoid.JumpHeight=7.2
+                    end
+                    UIS.MouseBehavior=Enum.MouseBehavior.Default
+                    Camera.CameraType=Enum.CameraType.Custom
+                    Notif("🔓 RANSOM","Разморожен!")
+                    return
+                end
+                Camera.CFrame=frozenCF
+                if HRP then HRP.CFrame=HRP.CFrame end -- держим на месте
+            end)
+        end
+        desc.AncestryChanged:Connect(function()
+            if not desc.Parent and not F.ransom then
+                -- Ransom исчез но функция выкл — всё равно восстанавливаем
+                if Humanoid then Humanoid.WalkSpeed=16; Humanoid.JumpPower=50; Humanoid.JumpHeight=7.2 end
+                Camera.CameraType=Enum.CameraType.Custom
+            end
         end)
     end
 end)
 
--- ══════════════════════════════════════════════
---  SAFE PLATFORM
--- ══════════════════════════════════════════════
-local function CreatePlatform()
-    if safePlatform then return end
-    local p=Instance.new("Part")
-    p.Name="_SafePlatform"; p.Size=Vector3.new(8,0.4,8)
-    p.Anchored=true; p.CanCollide=true
-    p.Transparency=0.45; p.BrickColor=BrickColor.new("Bright blue")
-    p.Material=Enum.Material.SmoothPlastic; p.Parent=Workspace
-    safePlatform=p
-end
-local function RemovePlatform()
-    if safePlatform then safePlatform:Destroy(); safePlatform=nil end
-end
-local function UpdatePlatform()
-    if safePlatform and HumanoidRootPart then
-        local pos=HumanoidRootPart.Position
-        safePlatform.CFrame=CFrame.new(pos.X, pos.Y-3.2, pos.Z)
+Workspace.ChildAdded:Connect(function(obj)
+    if obj.Name=="Drops" then HandleDrop(obj) end
+end)
+
+-- ── DROPS ──────────────────────────────────────────────
+local DMAP={LaserPointer="🔴 ЛАЗЕР",Leftovers="🍱 ЛАНЧБОКС",FishFlakes="🐟 КАВА",Pizza="🍕 ПИЦЦА"}
+local DCOL={LaserPointer=Color3.fromRGB(255,50,50),Leftovers=Color3.fromRGB(255,200,80),FishFlakes=Color3.fromRGB(80,200,255),Pizza=Color3.fromRGB(255,140,0)}
+
+HandleDrop=function(drop)
+    if not F.drops then return end
+    local function tryC(child)
+        local label=DMAP[child.Name]; if not label then return end
+        local color=DCOL[child.Name]
+        task.spawn(function()
+            task.wait(0.1); if not child.Parent then return end
+            local part=GPP(child) or child:FindFirstChildWhichIsA("BasePart",true)
+            if part then MakeESP(part,"DropESP",label,color) end
+            MakeHL(child,"DropESP",color)
+            child.AncestryChanged:Connect(function()
+                if not child.Parent then RemESP(part,"DropESP"); RemHL(child,"DropESP") end
+            end)
+        end)
     end
+    for _,ch in ipairs(drop:GetChildren()) do tryC(ch) end
+    drop.ChildAdded:Connect(tryC)
 end
 
--- ══════════════════════════════════════════════
---  SMOOTH Y MOVE
---  bypassAntiTp=true во время движения → анти-тп не мешает
--- ══════════════════════════════════════════════
-local function SmoothY(fromY, toY, duration, onStep, onDone)
-    local t0=tick()
-    bypassAntiTp=true
-    local conn
-    conn=RunService.Heartbeat:Connect(function()
-        if not HumanoidRootPart then conn:Disconnect(); bypassAntiTp=false; return end
-        local pct=math.clamp((tick()-t0)/duration,0,1)
-        local ease=pct*pct*(3-2*pct)
-        onStep(fromY+(toY-fromY)*ease)
-        UpdatePlatform()
-        if pct>=1 then
-            conn:Disconnect()
-            -- НЕ сбрасываем bypassAntiTp здесь — он сбросится когда Rush/Ambush исчезнет
-            if onDone then onDone() end
-        end
+HandleDrone=function(obj)
+    if not F.drones then return end
+    MakeHL(obj,"DroneESP",Color3.fromRGB(180,180,180))
+    obj.AncestryChanged:Connect(function() if not obj.Parent then RemHL(obj,"DroneESP") end end)
+end
+
+-- ── WATER POOLS ────────────────────────────────────────
+local function MakePoolMarker(pool)
+    if not pool or not pool:IsA("BasePart") then return end
+    if pool:FindFirstChild("_PM") then return end
+    local sz=pool.Size
+    local m=Instance.new("Part"); m.Name="_PM"
+    m.Size=Vector3.new(sz.X,2,sz.Z); m.Anchored=true; m.CanCollide=false
+    m.Transparency=0.4; m.BrickColor=BrickColor.new("Bright blue")
+    m.Material=Enum.Material.Neon
+    m.CFrame=CFrame.new(pool.Position+Vector3.new(0,sz.Y/2+1,0)); m.Parent=Workspace
+    table.insert(poolParts,m)
+    local b=Instance.new("BillboardGui"); b.Size=UDim2.new(0,120,0,28)
+    b.AlwaysOnTop=true; b.StudsOffset=Vector3.new(0,2,0); b.Adornee=m; b.Parent=m
+    local l=Instance.new("TextLabel"); l.Size=UDim2.new(1,0,1,0); l.BackgroundTransparency=1
+    l.Text="💧 "..pool.Name; l.TextColor3=Color3.fromRGB(100,220,255)
+    l.TextStrokeTransparency=0; l.TextSize=13; l.Font=Enum.Font.GothamBold; l.Parent=b
+    pool.AncestryChanged:Connect(function() if not pool.Parent then pcall(function() m:Destroy() end) end end)
+end
+
+local function HandleWater(w)
+    if not F.waterPool then return end
+    for i=1,10 do
+        local p=w:FindFirstChild("Pool"..i)
+        if p and p:IsA("BasePart") then MakePoolMarker(p) end
+    end
+    w.ChildAdded:Connect(function(ch)
+        if not F.waterPool then return end
+        if ch.Name:match("^Pool%d+$") and ch:IsA("BasePart") then MakePoolMarker(ch) end
     end)
 end
 
--- ══════════════════════════════════════════════
---  RUSH / AMBUSH — мгновенное обнаружение через событие
--- ══════════════════════════════════════════════
-local function StartRush(obj)
-    if rushNotif and not notifiedRush[obj] then
-        notifiedRush[obj]=true
-        SendNotif("⚠ ВНИМАНИЕ!","РАШ летит!")
-    end
-    if rushUpEnabled and HumanoidRootPart and not rushActive then
-        rushActive=true
-        rushSavedY=HumanoidRootPart.Position.Y
-        CreatePlatform()
-        SmoothY(rushSavedY, rushSavedY+OFFSET_Y, MOVE_DUR, function(y)
-            if HumanoidRootPart then
-                local p=HumanoidRootPart.Position
-                HumanoidRootPart.CFrame=CFrame.new(p.X,y,p.Z)
+ScanWaterPools=function()
+    if not currentRooms then return end
+    for _,room in ipairs(currentRooms:GetChildren()) do
+        local assets=room:FindFirstChild("Assets")
+        if assets then
+            for _,o in ipairs(assets:GetChildren()) do
+                if o.Name=="Water" then HandleWater(o) end
             end
+        end
+    end
+end
+
+-- ── SMOOTH MOVE ────────────────────────────────────────
+local function SmoothY(fromY,toY,dur,onStep,onDone)
+    local t0=tick(); bypassAntiTp=true
+    local conn; conn=RunService.Heartbeat:Connect(function()
+        if not HRP then conn:Disconnect(); bypassAntiTp=false; return end
+        local pct=math.clamp((tick()-t0)/dur,0,1)
+        local ease=pct*pct*(3-2*pct)
+        onStep(fromY+(toY-fromY)*ease)
+        if pct>=1 then conn:Disconnect(); if onDone then onDone() end end
+    end)
+end
+
+-- ── SAFE PLATFORM ──────────────────────────────────────
+local safePlt=nil
+local function MakePlt(color)
+    local p=Instance.new("Part"); p.Size=Vector3.new(8,0.4,8)
+    p.Anchored=true; p.CanCollide=true; p.Transparency=0.4
+    p.BrickColor=color or BrickColor.new("Bright blue")
+    p.Material=Enum.Material.Neon; p.Parent=Workspace; return p
+end
+
+-- ── RUSH / AMBUSH ──────────────────────────────────────
+local function StartRush(obj)
+    if F.rushNotif and not notifRush[obj] then notifRush[obj]=true; Notif("⚠ РАШ!","Rush летит!") end
+    if F.rushUp and HRP and not rushActive then
+        rushActive=true; rushSavedY=HRP.Position.Y
+        safePlt=MakePlt(BrickColor.new("Bright blue"))
+        SmoothY(rushSavedY,rushSavedY+OFFSET_Y,MOVE_DUR,function(y)
+            if HRP then HRP.CFrame=CFrame.new(HRP.Position.X,y,HRP.Position.Z) end
+            if safePlt then safePlt.CFrame=CFrame.new(HRP.Position.X,HRP.Position.Y-3.2,HRP.Position.Z) end
         end)
     end
-    -- Следим за исчезновением
     obj.AncestryChanged:Connect(function()
         if not obj.Parent and rushActive then
             rushActive=false
-            if rushUpEnabled and HumanoidRootPart and rushSavedY then
-                local fromY=HumanoidRootPart.Position.Y
-                SmoothY(fromY, rushSavedY, MOVE_DUR, function(y)
-                    if HumanoidRootPart then
-                        local p=HumanoidRootPart.Position
-                        HumanoidRootPart.CFrame=CFrame.new(p.X,y,p.Z)
-                    end
-                end, function() RemovePlatform(); rushSavedY=nil; bypassAntiTp=false end)
-            else
-                bypassAntiTp=false
-            end
+            if HRP and rushSavedY then
+                local fy=HRP.Position.Y
+                SmoothY(fy,rushSavedY,MOVE_DUR,function(y)
+                    if HRP then HRP.CFrame=CFrame.new(HRP.Position.X,y,HRP.Position.Z) end
+                    if safePlt then safePlt.CFrame=CFrame.new(HRP.Position.X,HRP.Position.Y-3.2,HRP.Position.Z) end
+                end,function()
+                    bypassAntiTp=false; rushSavedY=nil
+                    if safePlt then safePlt:Destroy(); safePlt=nil end
+                end)
+            else bypassAntiTp=false end
         end
     end)
 end
 
 local function StartAmbush(obj)
-    if rushNotif and not notifiedRush[obj] then
-        notifiedRush[obj]=true
-        SendNotif("⚠ ВНИМАНИЕ!","АМБУШ летит!")
-    end
-    if ambushDownEnabled and HumanoidRootPart and not ambushActive then
-        ambushActive=true
-        ambushSavedY=HumanoidRootPart.Position.Y
-        CreatePlatform()
-        SmoothY(ambushSavedY, ambushSavedY-OFFSET_Y, MOVE_DUR, function(y)
-            if HumanoidRootPart then
-                local p=HumanoidRootPart.Position
-                HumanoidRootPart.CFrame=CFrame.new(p.X,y,p.Z)
-            end
+    if F.rushNotif and not notifRush[obj] then notifRush[obj]=true; Notif("⚠ АМБУШ!","Ambush летит!") end
+    if F.ambushDown and HRP and not ambushActive then
+        ambushActive=true; ambushSavedY=HRP.Position.Y
+        safePlt=MakePlt(BrickColor.new("Bright blue"))
+        SmoothY(ambushSavedY,ambushSavedY-OFFSET_Y,MOVE_DUR,function(y)
+            if HRP then HRP.CFrame=CFrame.new(HRP.Position.X,y,HRP.Position.Z) end
+            if safePlt then safePlt.CFrame=CFrame.new(HRP.Position.X,HRP.Position.Y-3.2,HRP.Position.Z) end
         end)
     end
     obj.AncestryChanged:Connect(function()
         if not obj.Parent and ambushActive then
             ambushActive=false
-            if ambushDownEnabled and HumanoidRootPart and ambushSavedY then
-                local fromY=HumanoidRootPart.Position.Y
-                SmoothY(fromY, ambushSavedY, MOVE_DUR, function(y)
-                    if HumanoidRootPart then
-                        local p=HumanoidRootPart.Position
-                        HumanoidRootPart.CFrame=CFrame.new(p.X,y,p.Z)
-                    end
-                end, function() RemovePlatform(); ambushSavedY=nil; bypassAntiTp=false end)
-            else
-                bypassAntiTp=false
-            end
+            if HRP and ambushSavedY then
+                local fy=HRP.Position.Y
+                SmoothY(fy,ambushSavedY,MOVE_DUR,function(y)
+                    if HRP then HRP.CFrame=CFrame.new(HRP.Position.X,y,HRP.Position.Z) end
+                    if safePlt then safePlt.CFrame=CFrame.new(HRP.Position.X,HRP.Position.Y-3.2,HRP.Position.Z) end
+                end,function()
+                    bypassAntiTp=false; ambushSavedY=nil
+                    if safePlt then safePlt:Destroy(); safePlt=nil end
+                end)
+            else bypassAntiTp=false end
         end
     end)
 end
 
--- Подписка на появление Rush/Ambush в Workspace
 Workspace.ChildAdded:Connect(function(obj)
-    if obj.Name=="RushMoving"  then StartRush(obj)   end
+    if obj.Name=="RushMoving" then StartRush(obj) end
     if obj.Name=="AmbushMoving" then StartAmbush(obj) end
 end)
--- Проверяем уже существующие (если скрипт загружен во время игры)
-for _, obj in ipairs(Workspace:GetChildren()) do
-    if obj.Name=="RushMoving"   then StartRush(obj)   end
+for _,obj in ipairs(Workspace:GetChildren()) do
+    if obj.Name=="RushMoving" then StartRush(obj) end
     if obj.Name=="AmbushMoving" then StartAmbush(obj) end
 end
-local function SetPlayerESP(plr, on)
-    if plr==Player then return end
-    local char=plr.Character; if not char then return end
-    local hrp=char:FindFirstChild("HumanoidRootPart")
-    if on then
-        if hrp then MakeESP(hrp,"PlayerESP","👤 "..plr.Name,Color3.fromRGB(100,200,255)) end
-        MakeHighlight(char,"PlayerESP",Color3.fromRGB(100,200,255))
-    else
-        if hrp then RemoveESP(hrp,"PlayerESP") end
-        RemoveHighlight(char,"PlayerESP")
-    end
-end
-Players.PlayerAdded:Connect(function(plr)
-    plr.CharacterAdded:Connect(function()
-        task.wait(1)
-        if playerESPEnabled then SetPlayerESP(plr,true) end
-    end)
-end)
 
--- ══════════════════════════════════════════════
---  X-RAY
--- ══════════════════════════════════════════════
-local xrayConn = nil
-local function ApplyXRay(obj)
-    if not obj:IsA("BasePart") and not obj:IsA("Model") then return end
-    if obj:FindFirstChild("_XRayHL") then return end
-    -- Пропускаем GUI и прозрачные объекты
-    local hl = Instance.new("Highlight")
-    hl.Name = "_XRayHL"
-    hl.Adornee = obj
-    hl.FillTransparency = 0.85
-    hl.OutlineTransparency = 0.5
-    hl.OutlineColor = Color3.fromRGB(255,255,255)
-    hl.FillColor = Color3.fromRGB(255,255,255)
-    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-    hl.Parent = obj
-end
-
--- ══════════════════════════════════════════════
---  FREECAM
--- ══════════════════════════════════════════════
-local freecamSpeed   = 20
-local freecamPitch   = 0
-local freecamYaw     = 0
-local freecamConn    = nil
-local recordConn     = nil
-local RECORD_INTERVAL = 0.15 -- секунд между точками
+-- ── FREECAM ────────────────────────────────────────────
+local fcSpd=20; local fcPitch2=0; local fcYaw2=0
 
 function StartFreecam()
-    if freecamActive then return end
-    freecamActive = true
-    Camera.CameraType = Enum.CameraType.Scriptable
-    freecamCam = Camera.CFrame
-    freecamPitch = 0
-    freecamYaw   = 0
-
-    -- Скрываем персонажа
+    if fcActive then return end; fcActive=true
+    Camera.CameraType=Enum.CameraType.Scriptable; fcCam=Camera.CFrame
+    fcPitch2=0; fcYaw2=0
     if Character then
-        for _, p in ipairs(Character:GetDescendants()) do
-            if p:IsA("BasePart") then p.LocalTransparencyModifier = 1 end
+        for _,p in ipairs(Character:GetDescendants()) do
+            if p:IsA("BasePart") then p.LocalTransparencyModifier=1 end
         end
     end
-
-    freecamConn = RunService.RenderStepped:Connect(function(dt)
-        if not freecamActive then return end
-
-        -- Мышь
-        local md = UserInputService:GetMouseDelta()
-        freecamYaw   = freecamYaw   - md.X * 0.3
-        freecamPitch = math.clamp(freecamPitch - md.Y * 0.3, -89, 89)
-
-        local rot = CFrame.Angles(0, math.rad(freecamYaw), 0)
-            * CFrame.Angles(math.rad(freecamPitch), 0, 0)
-
-        -- WASD движение
-        local move = Vector3.new()
-        if UserInputService:IsKeyDown(Enum.KeyCode.W) then move = move + Vector3.new(0,0,-1) end
-        if UserInputService:IsKeyDown(Enum.KeyCode.S) then move = move + Vector3.new(0,0,1)  end
-        if UserInputService:IsKeyDown(Enum.KeyCode.A) then move = move + Vector3.new(-1,0,0) end
-        if UserInputService:IsKeyDown(Enum.KeyCode.D) then move = move + Vector3.new(1,0,0)  end
-        if UserInputService:IsKeyDown(Enum.KeyCode.E) then move = move + Vector3.new(0,1,0)  end
-        if UserInputService:IsKeyDown(Enum.KeyCode.Q) then move = move + Vector3.new(0,-1,0) end
-
-        -- Shift = быстро
-        local spd = freecamSpeed * dt * (UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) and 3 or 1)
-        freecamCam = freecamCam + rot * (move * spd)
-        freecamCam = CFrame.new(freecamCam.Position) * rot
-
-        Camera.CFrame = freecamCam
-
-        -- Блокируем мышь
-        UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+    fcConn=RunService.RenderStepped:Connect(function(dt)
+        if not fcActive then return end
+        local md=UIS:GetMouseDelta()
+        fcYaw2=fcYaw2-md.X*0.3; fcPitch2=math.clamp(fcPitch2-md.Y*0.3,-89,89)
+        local rot=CFrame.Angles(0,math.rad(fcYaw2),0)*CFrame.Angles(math.rad(fcPitch2),0,0)
+        local mv=Vector3.new()
+        if UIS:IsKeyDown(Enum.KeyCode.W) then mv=mv+Vector3.new(0,0,-1) end
+        if UIS:IsKeyDown(Enum.KeyCode.S) then mv=mv+Vector3.new(0,0,1) end
+        if UIS:IsKeyDown(Enum.KeyCode.A) then mv=mv+Vector3.new(-1,0,0) end
+        if UIS:IsKeyDown(Enum.KeyCode.D) then mv=mv+Vector3.new(1,0,0) end
+        if UIS:IsKeyDown(Enum.KeyCode.E) then mv=mv+Vector3.new(0,1,0) end
+        if UIS:IsKeyDown(Enum.KeyCode.Q) then mv=mv+Vector3.new(0,-1,0) end
+        local spd2=fcSpd*dt*(UIS:IsKeyDown(Enum.KeyCode.LeftShift) and 3 or 1)
+        fcCam=fcCam+rot*(mv*spd2); fcCam=CFrame.new(fcCam.Position)*rot
+        Camera.CFrame=fcCam; UIS.MouseBehavior=Enum.MouseBehavior.LockCenter
     end)
-
-    -- Запись пути
-    recordConn = RunService.Heartbeat:Connect(function()
-        if not freecamActive then return end
-        if not recordingPath then return end
-        local last = recordedPoints[#recordedPoints]
-        local pos  = freecamCam.Position
-        if not last or (pos - last).Magnitude > 1.5 then
-            table.insert(recordedPoints, pos)
-            -- Добавляем шарик хвостика
-            local ball = Instance.new("Part")
-            ball.Size = Vector3.new(0.4,0.4,0.4)
-            ball.Shape = Enum.PartType.Ball
-            ball.Anchored = true
-            ball.CanCollide = false
-            ball.CastShadow = false
-            ball.Material = Enum.Material.Neon
-            ball.BrickColor = BrickColor.new("Cyan")
-            ball.CFrame = CFrame.new(pos)
-            ball.Parent = Workspace
-            table.insert(pathTrail, ball)
+    recConn=RunService.Heartbeat:Connect(function()
+        if not fcActive or not F.recPath then return end
+        local last=recPoints[#recPoints]; local pos=fcCam.Position
+        if not last or (pos-last).Magnitude>1.5 then
+            table.insert(recPoints,pos)
+            local ball=Instance.new("Part"); ball.Size=Vector3.new(0.4,0.4,0.4)
+            ball.Shape=Enum.PartType.Ball; ball.Anchored=true; ball.CanCollide=false
+            ball.CastShadow=false; ball.Material=Enum.Material.Neon
+            ball.BrickColor=BrickColor.new("Cyan"); ball.CFrame=CFrame.new(pos); ball.Parent=Workspace
+            table.insert(trail,ball)
         end
     end)
 end
 
 function StopFreecam()
-    if not freecamActive then return end
-    freecamActive = false
-    if freecamConn then freecamConn:Disconnect(); freecamConn=nil end
-    if recordConn  then recordConn:Disconnect();  recordConn=nil  end
-    Camera.CameraType = Enum.CameraType.Custom
-    UserInputService.MouseBehavior = Enum.MouseBehavior.Default
-    -- Возвращаем видимость персонажа
+    if not fcActive then return end; fcActive=false
+    if fcConn then fcConn:Disconnect(); fcConn=nil end
+    if recConn then recConn:Disconnect(); recConn=nil end
+    Camera.CameraType=Enum.CameraType.Custom; UIS.MouseBehavior=Enum.MouseBehavior.Default
     if Character then
-        for _, p in ipairs(Character:GetDescendants()) do
-            if p:IsA("BasePart") then p.LocalTransparencyModifier = 0 end
+        for _,p in ipairs(Character:GetDescendants()) do
+            if p:IsA("BasePart") then p.LocalTransparencyModifier=0 end
         end
     end
 end
 
--- ══════════════════════════════════════════════
---  ВОСПРОИЗВЕДЕНИЕ ПУТИ
--- ══════════════════════════════════════════════
 function PlayPath()
-    if isPlayingPath or #recordedPoints < 2 then return end
-    isPlayingPath = true
-    bypassAntiTp  = true
-
-    -- Платформа под игроком
-    pathPlatform = Instance.new("Part")
-    pathPlatform.Name = "_PathPlatform"
-    pathPlatform.Size = Vector3.new(8,0.4,8)
-    pathPlatform.Anchored = true
-    pathPlatform.CanCollide = true
-    pathPlatform.Transparency = 0.4
-    pathPlatform.BrickColor = BrickColor.new("Bright blue")
-    pathPlatform.Material = Enum.Material.Neon
-    pathPlatform.Parent = Workspace
-
+    if playing or #recPoints<2 then return end
+    playing=true; bypassAntiTp=true
+    pathPlt=MakePlt(BrickColor.new("Bright blue"))
     task.spawn(function()
-        for i = 1, #recordedPoints do
-            if not isPlayingPath then break end
-            local target = recordedPoints[i]
-            -- Плавно двигаемся к следующей точке
-            local startPos = HumanoidRootPart and HumanoidRootPart.Position or target
-            local dist = (target - startPos).Magnitude
-            local duration = dist / pathPlaySpeed
-            local t0 = tick()
-            while tick() - t0 < duration do
-                if not isPlayingPath then break end
-                local pct = math.clamp((tick()-t0)/math.max(duration,0.01),0,1)
-                local pos = startPos:Lerp(target, pct)
-                if HumanoidRootPart then
-                    HumanoidRootPart.CFrame = CFrame.new(pos)
-                end
-                if pathPlatform then
-                    pathPlatform.CFrame = CFrame.new(pos.X, pos.Y-3.2, pos.Z)
-                end
+        for i=1,#recPoints do
+            if not playing then break end
+            local tgt=recPoints[i]
+            local startP=HRP and HRP.Position or tgt
+            local dist=(tgt-startP).Magnitude
+            local dur=dist/math.max(pathSpd,1)
+            local t0=tick()
+            while tick()-t0<dur do
+                if not playing then break end
+                local pct=math.clamp((tick()-t0)/math.max(dur,0.01),0,1)
+                local pos=startP:Lerp(tgt,pct)
+                if HRP then HRP.CFrame=CFrame.new(pos) end
+                if pathPlt then pathPlt.CFrame=CFrame.new(pos.X,pos.Y-3.2,pos.Z) end
                 RunService.Heartbeat:Wait()
             end
-            if HumanoidRootPart then
-                HumanoidRootPart.CFrame = CFrame.new(target)
-            end
         end
-        isPlayingPath = false
-        bypassAntiTp  = false
-        if pathPlatform then pathPlatform:Destroy(); pathPlatform=nil end
-        -- Убираем хвостик
-        for _, p in ipairs(pathTrail) do pcall(function() p:Destroy() end) end
-        pathTrail = {}
+        playing=false; bypassAntiTp=false
+        if pathPlt then pathPlt:Destroy(); pathPlt=nil end
+        for _,p in ipairs(trail) do pcall(function() p:Destroy() end) end
+        trail={}
     end)
 end
 
--- ══════════════════════════════════════════════
---  DROPS ESP
--- ══════════════════════════════════════════════
-local DROPS_MAP = {
-    LaserPointer = "🔴 ЛАЗЕР",
-    Leftovers    = "🍱 ЛАНЧБОКС",
-    FishFlakes   = "🐟 КАВА",
-    Pizza        = "🍕 ПИЦЦА",
-}
-local DROPS_COLOR = {
-    LaserPointer = Color3.fromRGB(255,50,50),
-    Leftovers    = Color3.fromRGB(255,200,80),
-    FishFlakes   = Color3.fromRGB(80,200,255),
-    Pizza        = Color3.fromRGB(255,140,0),
-}
+-- ── PLAYER ESP ─────────────────────────────────────────
+local function SetPlrESP(plr,on)
+    if plr==Player then return end
+    local char=plr.Character; if not char then return end
+    local hrp=char:FindFirstChild("HumanoidRootPart")
+    if on then
+        if hrp then MakeESP(hrp,"PlayerESP","👤 "..plr.Name,Color3.fromRGB(100,200,255)) end
+        MakeHL(char,"PlayerESP",Color3.fromRGB(100,200,255))
+    else
+        if hrp then RemESP(hrp,"PlayerESP") end; RemHL(char,"PlayerESP")
+    end
+end
+Players.PlayerAdded:Connect(function(plr)
+    plr.CharacterAdded:Connect(function() task.wait(1); if F.plrESP then SetPlrESP(plr,true) end end)
+end)
 
-HandleDrop = function(drop)
-    if not dropsESP then return end
-    local function tryChild(child)
-        local label = DROPS_MAP[child.Name]
-        if not label then return end
-        local color = DROPS_COLOR[child.Name]
-        task.spawn(function()
-            task.wait(0.1)
-            if not child.Parent then return end
-            local part = GetPrimaryPart(child) or child:FindFirstChildWhichIsA("BasePart",true)
-            if part then MakeESP(part,"DropESP",label,color) end
-            MakeHighlight(child,"DropESP",color)
-            child.AncestryChanged:Connect(function()
-                if not child.Parent then
-                    RemoveESP(part,"DropESP")
-                    RemoveHighlight(child,"DropESP")
+-- ── SECRET /200 ────────────────────────────────────────
+local followBuilt=false
+local function BuildFollowUI()
+    if followBuilt then return end; followBuilt=true
+
+    Lbl(pTest,"🔐 Следование за игроком")
+
+    local function RefreshList()
+        for _,ch in ipairs(pTest:GetChildren()) do
+            if ch.Name=="PBtn" then ch:Destroy() end
+        end
+        for _,plr in ipairs(Players:GetPlayers()) do
+            if plr==Player then continue end
+            local pb=Instance.new("TextButton"); pb.Name="PBtn"
+            pb.Size=UDim2.new(1,0,0,30); pb.BackgroundColor3=Color3.fromRGB(30,30,50)
+            pb.Text="  👤 "..plr.Name; pb.TextColor3=Color3.fromRGB(180,180,220)
+            pb.TextSize=12; pb.Font=Enum.Font.GothamSemibold
+            pb.TextXAlignment=Enum.TextXAlignment.Left; pb.AutoButtonColor=false; pb.Parent=pTest
+            Instance.new("UICorner",pb).CornerRadius=UDim.new(0,6)
+            pb.MouseButton1Click:Connect(function()
+                followTarget=plr
+                for _,c in ipairs(pTest:GetChildren()) do
+                    if c.Name=="PBtn" then c.BackgroundColor3=Color3.fromRGB(30,30,50); c.TextColor3=Color3.fromRGB(180,180,220) end
                 end
+                pb.BackgroundColor3=Color3.fromRGB(30,70,30); pb.TextColor3=Color3.fromRGB(80,220,80)
+                Notif("✅","Выбран: "..plr.Name)
             end)
-        end)
-    end
-    for _, child in ipairs(drop:GetChildren()) do tryChild(child) end
-    drop.ChildAdded:Connect(tryChild)
-end
-
-HandleDrone = function(obj)
-    if not dronesESP then return end
-    if obj:FindFirstChild("DroneESP_HL") then return end
-    MakeHighlight(obj,"DroneESP",Color3.fromRGB(180,180,180))
-    obj.AncestryChanged:Connect(function()
-        if not obj.Parent then RemoveHighlight(obj,"DroneESP") end
-    end)
-end
-
--- Следим за Drops в Workspace
-Workspace.ChildAdded:Connect(function(obj)
-    if obj.Name=="Drops" then HandleDrop(obj) end
-end)
-
--- ══════════════════════════════════════════════
---  WATER POOLS — маркер над каждым пулом
--- ══════════════════════════════════════════════
-local dronesStampedeNotif = true -- глобальный флаг уведомления
-
-local function MakePoolMarker(pool)
-    if not pool or not pool:IsA("BasePart") then return end
-    if pool:FindFirstChild("_PoolMarker") then return end
-
-    -- Размер маркера = размер пула по X и Z, высота 2
-    local size = pool.Size
-    local marker = Instance.new("Part")
-    marker.Name = "_PoolMarker"
-    marker.Size = Vector3.new(size.X, 2, size.Z)
-    marker.Anchored = true
-    marker.CanCollide = false
-    marker.CastShadow = false
-    marker.Transparency = 0.4
-    marker.BrickColor = BrickColor.new("Bright blue")
-    marker.Material = Enum.Material.Neon
-    -- Позиция: над пулом на 1 блок (чтобы маркер был прямо над водой)
-    marker.CFrame = CFrame.new(pool.Position + Vector3.new(0, size.Y/2 + 1, 0))
-    marker.Parent = Workspace
-    table.insert(waterPoolParts, marker)
-
-    -- Надпись над маркером
-    local bill = Instance.new("BillboardGui")
-    bill.Size = UDim2.new(0,120,0,30)
-    bill.AlwaysOnTop = true
-    bill.StudsOffset = Vector3.new(0,2,0)
-    bill.Adornee = marker
-    bill.Parent = marker
-    local lbl = Instance.new("TextLabel")
-    lbl.Size = UDim2.new(1,0,1,0)
-    lbl.BackgroundTransparency = 1
-    lbl.Text = "💧 " .. pool.Name
-    lbl.TextColor3 = Color3.fromRGB(100,220,255)
-    lbl.TextStrokeTransparency = 0
-    lbl.TextSize = 13
-    lbl.Font = Enum.Font.GothamBold
-    lbl.Parent = bill
-
-    -- Убираем маркер если пул исчезает
-    pool.AncestryChanged:Connect(function()
-        if not pool.Parent then
-            pcall(function() marker:Destroy() end)
-        end
-    end)
-end
-
-local function HandleWater(waterModel)
-    if not waterPoolEnabled then return end
-    -- Pool1 .. Pool10
-    for i = 1, 10 do
-        local pool = waterModel:FindFirstChild("Pool"..i)
-        if pool and pool:IsA("BasePart") then
-            MakePoolMarker(pool)
         end
     end
-    -- Следим за новыми пулами
-    waterModel.ChildAdded:Connect(function(child)
-        if not waterPoolEnabled then return end
-        if child.Name:match("^Pool%d+$") and child:IsA("BasePart") then
-            MakePoolMarker(child)
-        end
-    end)
-end
 
-function ScanWaterPools()
-    if not currentRooms then return end
-    for _, room in ipairs(currentRooms:GetChildren()) do
-        local assets = room:FindFirstChild("Assets")
-        if assets then
-            for _, obj in ipairs(assets:GetChildren()) do
-                if obj.Name == "Water" then HandleWater(obj) end
+    Btn(pTest,"🔄 Обновить список",Color3.fromRGB(35,35,55),Color3.fromRGB(150,150,255),RefreshList)
+    RefreshList()
+    Sld(pTest,"Скорость следования",4,60,16,function(v) F.followSpd=v end)
+    Btn(pTest,"▶ СТАРТ — следовать",Color3.fromRGB(25,60,25),Color3.fromRGB(80,255,80),function()
+        if not followTarget or not followTarget.Character then Notif("❌","Выбери игрока!"); return end
+        if F.follow then return end; F.follow=true
+        followPlt=MakePlt(BrickColor.new("Bright green")); bypassAntiTp=true
+        followConn=RunService.Heartbeat:Connect(function(dt)
+            if not F.follow or not HRP then return end
+            local tc=followTarget and followTarget.Character
+            local th=tc and tc:FindFirstChild("HumanoidRootPart"); if not th then return end
+            local dist=(th.Position-HRP.Position).Magnitude
+            if dist>2 then
+                local dir=(th.Position-HRP.Position).Unit
+                HRP.CFrame=CFrame.new(HRP.Position+dir*math.min(F.followSpd*dt,dist))
             end
-        end
-        local water = room:FindFirstChild("Water")
-        if water then HandleWater(water) end
-    end
+            if followPlt then followPlt.CFrame=CFrame.new(HRP.Position.X,HRP.Position.Y-3.2,HRP.Position.Z) end
+        end)
+    end)
+    Btn(pTest,"■ СТОП",Color3.fromRGB(60,20,20),Color3.fromRGB(255,80,80),function()
+        F.follow=false; bypassAntiTp=false
+        if followConn then followConn:Disconnect(); followConn=nil end
+        if followPlt then followPlt:Destroy(); followPlt=nil end
+        Notif("⏹","Стоп")
+    end)
 end
 
--- ══════════════════════════════════════════════
---  DRONESSSTAMPEDE — уведомление
--- ══════════════════════════════════════════════
-Workspace.DescendantAdded:Connect(function(obj)
-    if obj.Name == "DronesStampede" then
-        SendNotif("🦬 СТАДА!", "Появилось стадо дронов!")
+Player.Chatted:Connect(function(msg)
+    if msg=="/200" then
+        BuildFollowUI(); Notif("🔐 Разблокировано","Следование доступно в ТЕСТ")
+        SelectTab("ТЕСТ")
     end
-    if obj.Name == "Drone" then HandleDrone(obj) end
 end)
 
--- ══════════════════════════════════════════════
---  MAIN LOOP
--- ══════════════════════════════════════════════
-local lastPos  = Vector3.new()
-local scanTick = 0
-
-local xrayScanTick = 0
+-- ── MAIN LOOP ──────────────────────────────────────────
+local xrayScan=0
 
 RunService.RenderStepped:Connect(function()
-    -- FOV через RenderStepped — применяется после рендера, игра не перебивает
-    Camera.FieldOfView = customFOV
+    Camera.FieldOfView=F.fov
 end)
 
 RunService.Heartbeat:Connect(function(dt)
-    if speedEnabled and Humanoid then Humanoid.WalkSpeed=customSpeed end
+    if F.speed and Humanoid then Humanoid.WalkSpeed=F.spd end
 
-    scanTick=scanTick+dt
-    if scanTick<0.1 then return end
-    scanTick=0
-
-    local ws=Workspace:GetChildren()
-    local rushFound=false
-    local ambushFound=false
-
-    for _, obj in ipairs(ws) do
-        local isRush   = obj.Name=="RushMoving"
-        local isAmbush = obj.Name=="AmbushMoving"
-
-        if isRush or isAmbush then
-            -- Только ESP надпись (движение обрабатывается через ChildAdded)
-            if rushAmbushESP then
-                local part=GetPrimaryPart(obj)
-                if part then MakeESP(part,"RushAmbushESP",isRush and "💨 РАШ" or "🌀 АМБУШ",Color3.fromRGB(255,60,60)) end
-            end
-        end
-
-        -- Eyes
-        if obj.Name=="Eyes" then
-            if eyesESP then
-                local part=GetPrimaryPart(obj)
-                if part then MakeESP(part,"EyesESP","👁 EYES",Color3.fromRGB(180,0,255)) end
-            end
-            if eyesAntiDmg and HumanoidRootPart then
-                local part=GetPrimaryPart(obj)
-                if part then
-                    -- Полностью блокируем камеру — переводим в Scriptable и смотрим ПРОЧЬ от Eyes
-                    Camera.CameraType = Enum.CameraType.Scriptable
-                    local away = (HumanoidRootPart.Position - part.Position).Unit
-                    -- Смотрим в противоположную от Eyes сторону
-                    local lookAt = Camera.CFrame.Position + away
-                    Camera.CFrame = CFrame.new(Camera.CFrame.Position, lookAt)
-                end
-            end
-        end
-    end
-
-    -- Если Eyes исчезли — возвращаем камеру
-    if eyesAntiDmg and Camera.CameraType == Enum.CameraType.Scriptable then
-        local eyesExists = false
-        for _, obj in ipairs(ws) do
-            if obj.Name == "Eyes" then eyesExists = true; break end
-        end
-        if not eyesExists then
-            Camera.CameraType = Enum.CameraType.Custom
-        end
-    end
-
-    -- X-Ray — раз в 2 сек сканируем новые объекты
-    if xrayEnabled then
-        if not xrayScanTick then xrayScanTick = 0 end
-        xrayScanTick = xrayScanTick + dt
-        if xrayScanTick > 2 then
-            xrayScanTick = 0
-            if currentRooms then
-                for _, room in ipairs(currentRooms:GetChildren()) do
-                    for _, part in ipairs(room:GetDescendants()) do
-                        if part:IsA("BasePart") and not part:FindFirstChild("_XRayHL") then
-                            ApplyXRay(part)
-                        end
+    xrayScan=xrayScan+dt
+    if F.xray and xrayScan>2 then
+        xrayScan=0
+        if currentRooms then
+            for _,room in ipairs(currentRooms:GetChildren()) do
+                for _,part in ipairs(room:GetDescendants()) do
+                    if part:IsA("BasePart") and not part:FindFirstChild("_XHL") then
+                        local h=Instance.new("Highlight"); h.Name="_XHL"; h.Adornee=part
+                        h.FillTransparency=0.85; h.OutlineTransparency=0.5
+                        h.OutlineColor=Color3.fromRGB(255,255,255); h.FillColor=Color3.fromRGB(255,255,255)
+                        h.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop; h.Parent=part
                     end
                 end
             end
         end
     end
 
-    -- Screech
-    if screechTurn and activeSreech then
-        local part=activeSreech:FindFirstChild("HumanoidRootPart") or activeSreech:FindFirstChildWhichIsA("BasePart")
-        if part then Camera.CFrame=CFrame.new(Camera.CFrame.Position,part.Position) end
+    local ws=Workspace:GetChildren()
+    for _,obj in ipairs(ws) do
+        if F.rushESP and (obj.Name=="RushMoving" or obj.Name=="AmbushMoving") then
+            local part=GPP(obj)
+            if part then MakeESP(part,"RAmbESP",obj.Name=="RushMoving" and "💨 РАШ" or "🌀 АМБУШ",Color3.fromRGB(255,60,60)) end
+        end
+
+        local needBlockCam=false
+        if obj.Name=="Eyes" then
+            if F.eyesESP then local p=GPP(obj); if p then MakeESP(p,"EyesESP","👁 EYES",Color3.fromRGB(180,0,255)) end end
+            if F.eyesAnti and HRP then
+                local p=GPP(obj)
+                if p then needBlockCam=true
+                    Camera.CameraType=Enum.CameraType.Scriptable
+                    local away=(HRP.Position-p.Position).Unit
+                    Camera.CFrame=CFrame.new(Camera.CFrame.Position,Camera.CFrame.Position+away)
+                end
+            end
+        end
+        if obj.Name=="Alma" and F.almaAnti and HRP then
+            local p=GPP(obj)
+            if p then needBlockCam=true
+                Camera.CameraType=Enum.CameraType.Scriptable
+                local away=(HRP.Position-p.Position).Unit
+                Camera.CFrame=CFrame.new(Camera.CFrame.Position,Camera.CFrame.Position+away)
+            end
+        end
+        if not needBlockCam and (F.eyesAnti or F.almaAnti) then
+            local hasBlock=false
+            for _,o in ipairs(ws) do
+                if (o.Name=="Eyes" and F.eyesAnti) or (o.Name=="Alma" and F.almaAnti) then hasBlock=true; break end
+            end
+            if not hasBlock and Camera.CameraType==Enum.CameraType.Scriptable and not fcActive then
+                Camera.CameraType=Enum.CameraType.Custom
+            end
+        end
     end
 
-    -- Figure
-    if currentRooms then
-        for _, room in ipairs(currentRooms:GetChildren()) do
+    if F.screechTurn and activeScreech then
+        local p=activeScreech:FindFirstChild("HumanoidRootPart") or activeScreech:FindFirstChildWhichIsA("BasePart")
+        if p then Camera.CFrame=CFrame.new(Camera.CFrame.Position,p.Position) end
+    end
+
+    if currentRooms and F.figESP or F.figAvoid then
+        for _,room in ipairs(currentRooms and currentRooms:GetChildren() or {}) do
             local rig=room:FindFirstChild("FigureRig",true) or room:FindFirstChild("FigureSetup",true)
             if rig then
                 local pp=rig:FindFirstChild("HumanoidRootPart") or rig:FindFirstChildWhichIsA("BasePart")
                 if pp then
-                    if figureESP then MakeESP(pp,"FigureESP","👹 FIGURE",Color3.fromRGB(255,0,0)) end
-                    if figureAvoid and HumanoidRootPart then
-                        local dist=(HumanoidRootPart.Position-pp.Position).Magnitude
-                        if dist<avoidRadius then
-                            local dir=(HumanoidRootPart.Position-pp.Position).Unit
-                            HumanoidRootPart.CFrame=HumanoidRootPart.CFrame+dir*2
+                    if F.figESP then MakeESP(pp,"FigESP","👹 FIGURE",Color3.fromRGB(255,0,0)) end
+                    if F.figAvoid and HRP then
+                        local dist=(HRP.Position-pp.Position).Magnitude
+                        if dist<F.figR then
+                            HRP.CFrame=HRP.CFrame+(HRP.Position-pp.Position).Unit*2
                         end
                     end
                 end
@@ -1549,10 +1113,22 @@ RunService.Heartbeat:Connect(function(dt)
         end
     end
 
-    -- Игроки ESP
-    if playerESPEnabled then
-        for _, plr in ipairs(Players:GetPlayers()) do SetPlayerESP(plr,true) end
+    if F.plrESP then
+        for _,plr in ipairs(Players:GetPlayers()) do SetPlrESP(plr,true) end
     end
 end)
 
-SendNotif("Doors v3.1","RightShift = скрыть меню")
+-- ── RADIUS ESP (в разделе Игроки) ────────────────────
+Lbl(pPlayers,"Радиус ESP")
+Tog(pPlayers,"ESP только в радиусе",function(s)
+    F.radiusESP=s
+    if not s then
+        -- убираем все радиус-хайлайты
+        for _,o in ipairs(Workspace:GetDescendants()) do
+            local h=o:FindFirstChild("_RHL"); if h then h:Destroy() end
+        end
+    end
+end)
+Sld(pPlayers,"Радиус ESP (блоков)",50,500,150,function(v) F.radiusVal=v end)
+
+Notif("Doors v3.2","RightShift = меню | /200 = секрет")
